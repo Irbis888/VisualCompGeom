@@ -143,12 +143,21 @@ network download.
 
 ### Visual Studio debugging
 
-Run `build.ps1` once, then open the generated Visual Studio solution/project
-inside `RaylibGeometryVisualizer/build`. Select `geometry_visualizer` as the
-startup target and run it normally with the debugger.
+Open `VisualCompGeom.sln` from the repository root. The tracked
+`RaylibGeometryVisualizer` wrapper project invokes CMake automatically and
+launches the correct Debug or Release executable.
 
-`MyCodeAttempt.sln` contains the standalone CPU/CUDA console projects; it does
-not contain the CMake-generated raylib application.
+On the first launch, right-click `RaylibGeometryVisualizer` in Solution
+Explorer and choose **Set as Startup Project**, then press `F5`. The project is
+listed first in a fresh solution and will normally already be selected.
+
+Building the entire root solution also builds the CUDA project and therefore
+requires CUDA 13.3. If CUDA is not installed, build or start only
+`RaylibGeometryVisualizer`; the visualizer itself has no CUDA dependency.
+
+The standalone `CompGeomAlgos/CPUConvexHull.slnx` and
+`CudaPlayground/CudaPlayground.slnx` solutions remain available for focused
+console-project work.
 
 ## Using the application
 
@@ -231,6 +240,7 @@ boundary counterclockwise; for convex hull, points may appear in any order.
 
 ```text
 VisualCompGeom/
+|-- VisualCompGeom.sln             root Visual Studio solution
 |-- include/
 |   |-- GeometryScene.h          shared rendering/event model
 |   `-- Commons.h/.cpp           shared point predicates and TXT reader
@@ -450,4 +460,3 @@ available.
 This repository currently has no root license file. Add an explicit license
 before publishing if you want others to have clear permission to use, modify,
 or redistribute the code.
-

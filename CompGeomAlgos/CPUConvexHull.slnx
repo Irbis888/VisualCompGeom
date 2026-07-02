@@ -2,8 +2,5 @@
   <Configurations>
     <Platform Name="x64" />
   </Configurations>
-  <Project Path="../CudaConvexHull/CudaConvexHull.vcxproj">
-    <Platform Project="x64" />
-  </Project>
   <Project Path="CPUConvexHull.vcxproj" Id="215f55a3-d2f8-41ef-9c5d-a4b279197fff" />
 </Solution>

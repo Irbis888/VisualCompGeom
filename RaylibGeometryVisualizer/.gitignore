@@ -1,2 +1,5 @@
 build/
+out/
+x64/
+RaylibGe.*/
 raylib-6.0*.zip*
