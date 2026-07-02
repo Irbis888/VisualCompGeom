@@ -1,0 +1,453 @@
+# VisualCompGeom
+
+VisualCompGeom is a small C++17 application for interactively visualizing
+computational-geometry algorithms. It uses [raylib](https://www.raylib.com/)
+for rendering and keeps algorithm code separate from the renderer through a
+shared `GeometryScene` event model.
+
+The application currently visualizes:
+
+- a CPU convex hull over an unordered point cloud;
+- polygon monotonization and triangulation.
+
+Points can be edited directly in the window, algorithm operations can be
+played forward or backward, and each algorithm has a persistent TXT input
+file.
+
+## Project status
+
+The raylib visualizer and the two CPU algorithms are functional and covered
+by a smoke test. The CUDA directories are experiments and are not registered
+in the visualizer.
+
+The documented and tested build environment is Windows x64 with Visual Studio
+2022 or 2026. The CMake project itself may be portable, but other operating
+systems are not currently tested by this repository.
+
+## Algorithms
+
+### CPU Convex Hull
+
+`CompGeomAlgos/CPUConvexHull.cpp` sorts an arbitrary point cloud by X and then
+Y, constructs upper and lower chains, and uses the `Orient2D` predicate to
+remove turns that cannot belong to the hull. The visualization records every
+edge addition and removal, so the chain stack behavior can be replayed.
+
+Input order is irrelevant. The algorithm uses integer coordinates internally.
+
+### Polygon Triangulation
+
+`Triangulation/Triangulation.cpp` first classifies polygon vertices and uses a
+sweep-line status structure to insert diagonals that partition the polygon
+into Y-monotone pieces. It then recursively inserts valid interior diagonals
+until every piece is a triangle.
+
+The input must be a simple counterclockwise polygon whose points are listed in
+boundary order. Consecutive duplicate vertices are rejected. Integer
+coordinates and distinct vertex heights are recommended for clear sweep-line
+examples.
+
+Orange edges are monotonization diagonals; red edges are triangulation
+diagonals.
+
+### CUDA directories
+
+`literally nothing to see here, go on`
+
+`CudaPlayground` is a minimal CUDA vector-addition experiment.
+`CudaConvexHull` is also experimental: despite its directory name, it does not
+yet implement a complete GPU convex hull and is not used by the raylib app.
+CUDA and the CUDA Toolkit are therefore **not required** to build or use the
+visualizer.
+
+## Prerequisites
+
+Install:
+
+- Windows 10 or 11, x64;
+- Visual Studio 2022 or 2026 with:
+  - **Desktop development with C++**;
+  - **C++ CMake tools for Windows**;
+- PowerShell;
+- an internet connection for the first build.
+
+Raylib does not need to be installed globally. CMake downloads the pinned
+Raylib 6.0 source into the local build directory and builds it together with
+the application.
+
+## Quick start
+
+Clone the repository and enter the visualizer directory:
+
+```powershell
+git clone <repository-url>
+cd VisualCompGeom\RaylibGeometryVisualizer
+```
+
+Build and run the Debug configuration:
+
+```powershell
+.\build.ps1
+.\run.ps1
+```
+
+For an optimized build:
+
+```powershell
+.\build.ps1 -Configuration Release
+.\run.ps1 -Configuration Release
+```
+
+The first build downloads approximately 50 MB of Raylib source. Later builds
+reuse the local copy in `RaylibGeometryVisualizer/build`.
+
+### Manual CMake build
+
+The scripts are conveniences. The equivalent Visual Studio 2022 commands are:
+
+```powershell
+cmake -S RaylibGeometryVisualizer -B RaylibGeometryVisualizer\build `
+  -G "Visual Studio 17 2022" -A x64
+cmake --build RaylibGeometryVisualizer\build --config Debug
+```
+
+For Visual Studio 2026, use:
+
+```powershell
+cmake -S RaylibGeometryVisualizer -B RaylibGeometryVisualizer\build `
+  -G "Visual Studio 18 2026" -A x64
+cmake --build RaylibGeometryVisualizer\build --config Debug
+```
+
+Run the resulting executable:
+
+```powershell
+.\RaylibGeometryVisualizer\build\Debug\geometry_visualizer.exe
+```
+
+If CMake reports that the existing build directory uses a different
+generator, remove `RaylibGeometryVisualizer/build` and configure again.
+
+### Offline or slow Raylib download
+
+Download the official
+[Raylib 6.0 source archive](https://codeload.github.com/raysan5/raylib/zip/refs/tags/6.0)
+in a browser and save it as:
+
+```text
+RaylibGeometryVisualizer/raylib-6.0.zip
+```
+
+CMake verifies the archive's SHA-256 hash and automatically prefers it over a
+network download.
+
+### Visual Studio debugging
+
+Run `build.ps1` once, then open the generated Visual Studio solution/project
+inside `RaylibGeometryVisualizer/build`. Select `geometry_visualizer` as the
+startup target and run it normally with the debugger.
+
+`MyCodeAttempt.sln` contains the standalone CPU/CUDA console projects; it does
+not contain the CMake-generated raylib application.
+
+## Using the application
+
+The app starts in **CPU Convex Hull** mode.
+
+### Algorithm selection
+
+| Input | Action |
+|---|---|
+| `1` | Select CPU Convex Hull |
+| `2` | Select Polygon Triangulation |
+| `Tab` | Select the next registered algorithm |
+
+Switching algorithms automatically loads that algorithm's TXT input file,
+recomputes its visualization, resets playback, and fits the view.
+
+### Playback
+
+| Input | Action |
+|---|---|
+| `Space` | Play or pause forward playback |
+| `B` | Play or pause backward playback |
+| `Left` / `Right` | Move one operation backward or forward |
+| `Home` / `End` | Jump to the beginning or end |
+| `R` | Replay from the beginning |
+| `Up` / `Down` | Increase or decrease playback speed |
+
+### Editing and camera
+
+| Input | Action |
+|---|---|
+| Left-drag a point | Move it; coordinates snap to integers |
+| `Shift` + left-click empty space | Add a point |
+| Right-click a point | Remove it |
+| Right-drag empty space | Pan the camera |
+| Mouse wheel | Zoom around the pointer |
+| `F` | Fit all points in the window |
+| `C` | Clear all points |
+| `Enter` | Re-run the active algorithm |
+| `Escape` | Close the application |
+
+Editing a point automatically recomputes the active algorithm and restarts
+its timeline.
+
+### Loading and saving input
+
+| Input | Action |
+|---|---|
+| `L` | Reload the active algorithm's TXT file |
+| `S` | Save the current points to that TXT file |
+
+The files are:
+
+- `CompGeomAlgos/input.txt` for CPU Convex Hull;
+- `Triangulation/input.txt` for Polygon Triangulation.
+
+Both use this format:
+
+```text
+<point-count>
+<x0> <y0>
+<x1> <y1>
+...
+```
+
+Example:
+
+```text
+4
+0 0
+100 0
+100 100
+0 100
+```
+
+Saving rounds coordinates to integers. For triangulation, list the polygon
+boundary counterclockwise; for convex hull, points may appear in any order.
+
+## Architecture
+
+```text
+VisualCompGeom/
+|-- include/
+|   |-- GeometryScene.h          shared rendering/event model
+|   `-- Commons.h/.cpp           shared point predicates and TXT reader
+|-- CompGeomAlgos/
+|   |-- ConvexAPI.h
+|   |-- CPUConvexHull.cpp
+|   `-- input.txt
+|-- Triangulation/
+|   |-- TriangulationAPI.h
+|   |-- Triangulation.cpp
+|   `-- input.txt
+`-- RaylibGeometryVisualizer/
+    |-- CMakeLists.txt
+    |-- build.ps1 / run.ps1
+    `-- src/
+        |-- algorithm_registry.h/.cpp
+        `-- main.cpp
+```
+
+`main.cpp` contains only generic drawing, camera, editing, TXT I/O, and
+timeline playback. It does not include an algorithm API.
+
+Each algorithm API returns an `AlgorithmVisualization` containing:
+
+- `scene.points`: all input points;
+- `scene.persistentEdges`: edges visible for the entire timeline;
+- `scene.timeline`: ordered edge additions/removals with captions;
+- `status`: a short result or error message;
+- `succeeded`: whether the algorithm accepted the input.
+
+The renderer applies timeline events from the beginning up to the selected
+step. This makes forward stepping and rewinding deterministic without putting
+algorithm-specific state in the renderer.
+
+### Scene colors
+
+| `EdgeLayer` | Default use | Color |
+|---|---|---|
+| `Input` | Input polygon or permanent edges | Blue |
+| `Intermediate` | Temporary/intermediate construction | Orange |
+| `Result` | Final-result construction | Red |
+
+## Adding a new algorithm
+
+The extension boundary is deliberately small. Do not add algorithm-specific
+logic to `main.cpp`.
+
+### 1. Create the algorithm API
+
+Create a directory such as `MyAlgorithm` with `MyAlgorithmAPI.h`,
+`MyAlgorithm.cpp`, and `input.txt`.
+
+Minimal header:
+
+```cpp
+#pragma once
+
+#include "GeometryScene.h"
+
+#include <vector>
+
+namespace my_algorithm {
+
+struct Result {
+    AlgorithmVisualization visualization;
+    // Optional algorithm-specific output can be stored here too.
+};
+
+Result Run(const std::vector<Point2>& points);
+
+} // namespace my_algorithm
+```
+
+### 2. Construct the visualization in the API
+
+The API—not the renderer—must decide which edges exist and when they change.
+
+```cpp
+my_algorithm::Result my_algorithm::Run(const std::vector<Point2>& points)
+{
+    Result result;
+    GeometryScene& scene = result.visualization.scene;
+    scene.points = points;
+
+    // Always-visible edge between point 0 and point 1.
+    scene.persistentEdges.push_back({{0, 1}, EdgeLayer::Input});
+
+    // Add an edge at the next playback step.
+    scene.timeline.push_back({
+        EdgeAction::Add,
+        {{1, 2}, EdgeLayer::Intermediate},
+        "Add candidate edge"
+    });
+
+    // Remove the same edge at a later step.
+    scene.timeline.push_back({
+        EdgeAction::Remove,
+        {{1, 2}, EdgeLayer::Intermediate},
+        "Reject candidate edge"
+    });
+
+    // Add a final result edge.
+    scene.timeline.push_back({
+        EdgeAction::Add,
+        {{0, 2}, EdgeLayer::Result},
+        "Accept result edge"
+    });
+
+    result.visualization.status = "Ready.";
+    result.visualization.succeeded = true;
+    return result;
+}
+```
+
+Every edge endpoint is an index into `scene.points`. Never emit an out-of-range
+index. Use the same `SceneEdge` and `EdgeLayer` for a matching add/remove pair.
+
+If the input is invalid, preserve the points for display, set a useful status
+message, leave `succeeded` false, and return without throwing when practical.
+
+### 3. Add the source to CMake
+
+In `RaylibGeometryVisualizer/CMakeLists.txt`:
+
+```cmake
+add_library(my_algorithm
+    ../MyAlgorithm/MyAlgorithm.cpp
+)
+target_include_directories(my_algorithm PUBLIC
+    ../MyAlgorithm
+    ../include
+)
+
+target_compile_definitions(geometry_visualizer PRIVATE
+    MY_ALGORITHM_INPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../MyAlgorithm/input.txt"
+)
+
+target_link_libraries(geometry_visualizer PRIVATE my_algorithm)
+```
+
+If the source also contains a standalone console `main()`, guard it with a
+compile definition, following `TRIANGULATION_NO_MAIN` and
+`CPU_CONVEX_HULL_NO_MAIN` in the existing CMake file.
+
+### 4. Register the algorithm
+
+Include the API in `RaylibGeometryVisualizer/src/algorithm_registry.cpp`,
+define a fallback input path, and add one descriptor:
+
+```cpp
+#include "MyAlgorithmAPI.h"
+
+#ifndef MY_ALGORITHM_INPUT_FILE
+#define MY_ALGORITHM_INPUT_FILE "input.txt"
+#endif
+
+// Inside AvailableAlgorithms():
+{
+    "My Algorithm",
+    MY_ALGORITHM_INPUT_FILE,
+    [](const std::vector<Point2>& points) {
+        return my_algorithm::Run(points).visualization;
+    }
+}
+```
+
+Its position in `AvailableAlgorithms()` determines its number key. The first
+registered algorithm is selected at startup. `Tab` automatically cycles
+through every registered entry.
+
+No change to `main.cpp` is required.
+
+### 5. Test it
+
+Rebuild and run the shared smoke test:
+
+```powershell
+cd RaylibGeometryVisualizer
+.\build.ps1
+.\build\Debug\geometry_visualizer.exe --smoke-test
+```
+
+The smoke test loads every registered input, requires a successful non-empty
+timeline, checks TXT round-tripping, and initializes a hidden Raylib/OpenGL
+window. It returns a non-zero exit code on failure.
+
+## Troubleshooting
+
+### Raylib cannot be downloaded
+
+Use the local archive procedure under **Offline or slow Raylib download** and
+confirm the file is named exactly `raylib-6.0.zip`.
+
+### The triangulation input is rejected
+
+Check that the polygon:
+
+- has at least three points;
+- is simple and does not self-intersect;
+- is listed counterclockwise;
+- has no consecutive duplicate points.
+
+### The visualizer opens the wrong dataset
+
+Each registered algorithm owns a separate input path. Switch to the desired
+algorithm, then press `L`. Pressing `S` overwrites the input file shown in the
+application panel.
+
+### Lines look jagged
+
+The app requests a 4x MSAA framebuffer before window creation. Support still
+depends on the graphics driver; update the driver if multisampling is not
+available.
+
+## Publishing note
+
+This repository currently has no root license file. Add an explicit license
+before publishing if you want others to have clear permission to use, modify,
+or redistribute the code.
+
