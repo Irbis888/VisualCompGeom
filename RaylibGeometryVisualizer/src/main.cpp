@@ -2,6 +2,7 @@
 
 #include "GeometryScene.h"
 #include "algorithm_registry.h"
+#include "input_register.h"
 
 #include <algorithm>
 #include <cmath>
@@ -174,9 +175,8 @@ void DrawScene(
     }
 }
 
-int PointUnderMouse(const GeometryScene& scene, const View2D& view)
+int PointUnderMouse(const GeometryScene& scene, const View2D& view, Vector2 mouse)
 {
-    const Vector2 mouse = GetMousePosition();
     for (std::size_t i = 0; i < scene.points.size(); ++i) {
         if (CheckCollisionPointCircle(mouse, WorldToScreen(scene.points[i], view), 12.0F)) {
             return static_cast<int>(i);
@@ -252,11 +252,14 @@ void RestartPlayback(Playback& playback)
     playback.elapsed = 0.0F;
 }
 
-void UpdatePlayback(Playback& playback, const GeometryScene& scene)
+void UpdatePlayback(
+    Playback& playback,
+    const GeometryScene& scene,
+    const ApplicationActions& actions)
 {
-    if (IsKeyPressed(KEY_R)) RestartPlayback(playback);
+    if (actions.restartPlayback) RestartPlayback(playback);
 
-    if (IsKeyPressed(KEY_SPACE)) {
+    if (actions.toggleForwardPlayback) {
         if (!playback.playing && playback.visibleEvents == scene.timeline.size()) {
             playback.visibleEvents = 0;
         }
@@ -264,7 +267,7 @@ void UpdatePlayback(Playback& playback, const GeometryScene& scene)
         playback.playing = !playback.playing;
         playback.elapsed = 0.0F;
     }
-    if (IsKeyPressed(KEY_B)) {
+    if (actions.toggleBackwardPlayback) {
         const bool wasRewinding = playback.playing && playback.direction < 0;
         if (!wasRewinding && playback.visibleEvents == 0) {
             playback.visibleEvents = scene.timeline.size();
@@ -273,26 +276,26 @@ void UpdatePlayback(Playback& playback, const GeometryScene& scene)
         playback.playing = !wasRewinding;
         playback.elapsed = 0.0F;
     }
-    if (IsKeyPressed(KEY_RIGHT)) {
+    if (actions.stepForward) {
         playback.playing = false;
         playback.visibleEvents = std::min(playback.visibleEvents + 1, scene.timeline.size());
     }
-    if (IsKeyPressed(KEY_LEFT)) {
+    if (actions.stepBackward) {
         playback.playing = false;
         if (playback.visibleEvents > 0) --playback.visibleEvents;
     }
-    if (IsKeyPressed(KEY_HOME)) {
+    if (actions.jumpToStart) {
         playback.playing = false;
         playback.visibleEvents = 0;
     }
-    if (IsKeyPressed(KEY_END)) {
+    if (actions.jumpToEnd) {
         playback.playing = false;
         playback.visibleEvents = scene.timeline.size();
     }
-    if (IsKeyPressed(KEY_UP)) {
-        playback.eventsPerSecond = std::min(playback.eventsPerSecond * 1.25F, 30.0F);
+    if (actions.increaseSpeed) {
+        playback.eventsPerSecond = std::min(playback.eventsPerSecond * 1.25F, 60.0F);
     }
-    if (IsKeyPressed(KEY_DOWN)) {
+    if (actions.decreaseSpeed) {
         playback.eventsPerSecond = std::max(playback.eventsPerSecond / 1.25F, 0.25F);
     }
 
@@ -446,11 +449,14 @@ int main(int argc, char* argv[])
     int selectedPoint = -1;
     bool panning = false;
 
-    while (!WindowShouldClose()) {
-        const Vector2 mouse = GetMousePosition();
-        int hoveredPoint = PointUnderMouse(scene, view);
+    while (true) {
+        const InputRegister input = CollectInputRegister();
+        if (input.closeRequested) break;
+        const ApplicationActions actions = MapInputToApplicationActions(input);
+        const Vector2 mouse = actions.pointerPosition;
+        int hoveredPoint = PointUnderMouse(scene, view, mouse);
 
-        const float wheel = GetMouseWheelMove();
+        const float wheel = actions.zoomDelta;
         if (wheel != 0.0F) {
             const Point2 worldBeforeZoom = ScreenToWorld(mouse, view);
             view.zoom = std::clamp(view.zoom * std::pow(1.15F, wheel), 0.1F, 80.0F);
@@ -459,7 +465,7 @@ int main(int argc, char* argv[])
             view.center.y += worldBeforeZoom.y - worldAfterZoom.y;
         }
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+        if (actions.secondaryPressed) {
             if (hoveredPoint >= 0) {
                 scene.points.erase(scene.points.begin() + hoveredPoint);
                 RunAlgorithm(algorithms[activeAlgorithm], scene, status);
@@ -470,15 +476,15 @@ int main(int argc, char* argv[])
                 panning = true;
             }
         }
-        if (panning && IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-            const Vector2 delta = GetMouseDelta();
+        if (panning && actions.secondaryDown) {
+            const Vector2 delta = actions.pointerDelta;
             view.center.x -= delta.x / view.zoom;
             view.center.y += delta.y / view.zoom;
         }
-        if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)) panning = false;
+        if (actions.secondaryReleased) panning = false;
 
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            if ((IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) && hoveredPoint < 0) {
+        if (actions.primaryPressed) {
+            if (actions.addPointModifier && hoveredPoint < 0) {
                 scene.points.push_back(SnapToInteger(ScreenToWorld(mouse, view)));
                 RunAlgorithm(algorithms[activeAlgorithm], scene, status);
                 RestartPlayback(playback);
@@ -488,11 +494,11 @@ int main(int argc, char* argv[])
                 if (selectedPoint >= 0) playback.playing = false;
             }
         }
-        if (selectedPoint >= 0 && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        if (selectedPoint >= 0 && actions.primaryDown) {
             scene.points[static_cast<std::size_t>(selectedPoint)] =
                 SnapToInteger(ScreenToWorld(mouse, view));
         }
-        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+        if (actions.primaryReleased) {
             if (selectedPoint >= 0) {
                 RunAlgorithm(algorithms[activeAlgorithm], scene, status);
                 RestartPlayback(playback);
@@ -501,9 +507,12 @@ int main(int argc, char* argv[])
         }
 
         std::size_t requestedAlgorithm = activeAlgorithm;
-        if (IsKeyPressed(KEY_TAB)) requestedAlgorithm = (activeAlgorithm + 1) % algorithms.size();
-        for (std::size_t i = 0; i < std::min<std::size_t>(algorithms.size(), 9); ++i) {
-            if (IsKeyPressed(KEY_ONE + static_cast<int>(i))) requestedAlgorithm = i;
+        if (actions.nextAlgorithm) {
+            requestedAlgorithm = (activeAlgorithm + 1) % algorithms.size();
+        }
+        if (actions.selectedAlgorithm >= 0 &&
+            static_cast<std::size_t>(actions.selectedAlgorithm) < algorithms.size()) {
+            requestedAlgorithm = static_cast<std::size_t>(actions.selectedAlgorithm);
         }
         if (requestedAlgorithm != activeAlgorithm) {
             activeAlgorithm = requestedAlgorithm;
@@ -512,12 +521,12 @@ int main(int argc, char* argv[])
             FitViewToScene(scene, view);
         }
 
-        if (IsKeyPressed(KEY_L)) {
+        if (actions.load) {
             LoadAlgorithmInput(algorithms[activeAlgorithm], scene, status);
             RestartPlayback(playback);
             FitViewToScene(scene, view);
         }
-        if (IsKeyPressed(KEY_S)) {
+        if (actions.save) {
             try {
                 SavePointsToFile(algorithms[activeAlgorithm].inputFile, scene.points);
                 status = "Saved " + algorithms[activeAlgorithm].inputFile.filename().string() + ".";
@@ -527,18 +536,18 @@ int main(int argc, char* argv[])
                 playback.playing = false;
             }
         }
-        if (IsKeyPressed(KEY_C)) {
+        if (actions.clear) {
             scene = {};
             RunAlgorithm(algorithms[activeAlgorithm], scene, status);
             RestartPlayback(playback);
         }
-        if (IsKeyPressed(KEY_ENTER)) {
+        if (actions.runAlgorithm) {
             RunAlgorithm(algorithms[activeAlgorithm], scene, status);
             RestartPlayback(playback);
         }
-        if (IsKeyPressed(KEY_F)) FitViewToScene(scene, view);
+        if (actions.fitView) FitViewToScene(scene, view);
 
-        UpdatePlayback(playback, scene);
+        UpdatePlayback(playback, scene, actions);
 
         BeginDrawing();
         ClearBackground(Color{245, 247, 250, 255});
@@ -554,4 +563,3 @@ int main(int argc, char* argv[])
     CloseWindow();
     return 0;
 }
-

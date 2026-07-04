@@ -50,6 +50,7 @@ target_include_directories(cpu_convex_hull_algorithm PUBLIC
 add_executable(geometry_visualizer
     src/main.cpp
     src/algorithm_registry.cpp
+    src/input_register.cpp
 )
 target_include_directories(geometry_visualizer PRIVATE src ../include)
 target_compile_definitions(geometry_visualizer PRIVATE

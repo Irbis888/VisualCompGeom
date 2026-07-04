@@ -43,7 +43,7 @@ convex_hull::Result convex_hull::Run(const std::vector<Point2>& points)
 
     try {
         std::vector<IndexedVertex> sorted;
-        sorted.reserve(points.size());
+        sorted.reserve(points.size()); 
         for (std::size_t i = 0; i < points.size(); ++i) {
             const Point2 point = points[i];
             const double minInt = static_cast<double>(std::numeric_limits<int>::min());
@@ -59,10 +59,10 @@ convex_hull::Result convex_hull::Run(const std::vector<Point2>& points)
                     {}
                 },
                 i
-            });
+            });                                                                         // creates vertices
         }
 
-        std::sort(sorted.begin(), sorted.end(),
+        std::sort(sorted.begin(), sorted.end(),                                         // sorts vertices from up to down
             [](const IndexedVertex& left, const IndexedVertex& right) {
                 if (left.vertex.x != right.vertex.x) return left.vertex.x < right.vertex.x;
                 if (left.vertex.y != right.vertex.y) return left.vertex.y < right.vertex.y;

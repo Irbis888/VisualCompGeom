@@ -180,7 +180,7 @@ recomputes its visualization, resets playback, and fits the view.
 |---|---|
 | `Space` | Play or pause forward playback |
 | `B` | Play or pause backward playback |
-| `Left` / `Right` | Move one operation backward or forward |
+| `Left` / `Right` | Press to move one operation backward or forward; hold to scroll continuously |
 | `Home` / `End` | Jump to the beginning or end |
 | `R` | Replay from the beginning |
 | `Up` / `Down` | Increase or decrease playback speed |
