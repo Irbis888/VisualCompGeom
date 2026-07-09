@@ -8,7 +8,8 @@ shared `GeometryScene` event model.
 The application currently visualizes:
 
 - a CPU convex hull over an unordered point cloud;
-- polygon monotonization and triangulation.
+- polygon monotonization and triangulation;
+- Fortune's sweep-line algorithm for Voronoi diagrams.
 
 Points can be edited directly in the window, algorithm operations can be
 played forward or backward, and each algorithm has a persistent TXT input
@@ -16,9 +17,11 @@ file.
 
 ## Project status
 
-The raylib visualizer and the two CPU algorithms are functional and covered
-by a smoke test. The CUDA directories are experiments and are not registered
-in the visualizer.
+The raylib visualizer and the CPU algorithms are functional and covered by a
+smoke test. The Fortune Voronoi implementation currently builds raw Voronoi
+edges and vertices, clips them to a viewport box, and visualizes the sweep; DCEL
+face-cycle construction from the clipped raw edges is still future work. The
+CUDA directories are experiments and are not registered in the visualizer.
 
 The documented and tested build environment is Windows x64 with Visual Studio
 2022 or 2026. The CMake project itself may be portable, but other operating
@@ -49,6 +52,20 @@ examples.
 
 Orange edges are monotonization diagonals; red edges are triangulation
 diagonals.
+
+### Fortune Voronoi
+
+`FortuneVoronoi/FortuneVoronoi.cpp` runs a top-to-bottom event sweep. Site
+events split the symbolic beach-line tree and create raw Voronoi edges; circle
+events create Voronoi vertices, finish the old raw edges, remove the
+disappearing arc, and start the new edge. After the sweep, unfinished raw edges
+are clipped to a viewport box and emitted as drawable segments.
+
+The computation does not store parabolic arcs directly. Beach-line leaves store
+site pointers, internal tree nodes store ordered breakpoint site-pairs, and the
+sampled parametric curve is produced only for visualization. The standalone
+Fortune project prints the raw vertices, raw-edge count, and clipped segments
+to the console.
 
 ### CUDA directories
 
@@ -155,9 +172,9 @@ Building the entire root solution also builds the CUDA project and therefore
 requires CUDA 13.3. If CUDA is not installed, build or start only
 `RaylibGeometryVisualizer`; the visualizer itself has no CUDA dependency.
 
-The standalone `CompGeomAlgos/CPUConvexHull.slnx` and
-`CudaPlayground/CudaPlayground.slnx` solutions remain available for focused
-console-project work.
+The standalone `CompGeomAlgos/CPUConvexHull.slnx`,
+`FortuneVoronoi/FortuneVoronoi.slnx`, and `CudaPlayground/CudaPlayground.slnx`
+solutions remain available for focused console-project work.
 
 ## Using the application
 
@@ -169,6 +186,7 @@ The app starts in **CPU Convex Hull** mode.
 |---|---|
 | `1` | Select CPU Convex Hull |
 | `2` | Select Polygon Triangulation |
+| `3` | Select Fortune Voronoi |
 | `Tab` | Select the next registered algorithm |
 
 Switching algorithms automatically loads that algorithm's TXT input file,
@@ -212,7 +230,8 @@ its timeline.
 The files are:
 
 - `CompGeomAlgos/input.txt` for CPU Convex Hull;
-- `Triangulation/input.txt` for Polygon Triangulation.
+- `Triangulation/input.txt` for Polygon Triangulation;
+- `FortuneVoronoi/input.txt` for Fortune Voronoi sites.
 
 Both use this format:
 
@@ -252,6 +271,11 @@ VisualCompGeom/
 |   |-- TriangulationAPI.h
 |   |-- Triangulation.cpp
 |   `-- input.txt
+|-- FortuneVoronoi/
+|   |-- FortuneAPI.h
+|   |-- FortuneVoronoi.cpp
+|   |-- FortuneVoronoi.vcxproj / FortuneVoronoi.slnx
+|   `-- input.txt
 `-- RaylibGeometryVisualizer/
     |-- CMakeLists.txt
     |-- build.ps1 / run.ps1
@@ -265,9 +289,12 @@ timeline playback. It does not include an algorithm API.
 
 Each algorithm API returns an `AlgorithmVisualization` containing:
 
-- `scene.points`: all input points;
+- `scene.points`: input points plus optional generated points, addressed by index;
+- `scene.pointStyles`: optional per-point radius/color overrides;
+- `scene.initialVisiblePointCount`: how many leading points are editable input points;
 - `scene.persistentEdges`: edges visible for the entire timeline;
-- `scene.timeline`: ordered edge additions/removals with captions;
+- `scene.persistentSweepLine` / `scene.persistentParametricCurve`: optional always-visible overlays;
+- `scene.timeline`: ordered edge, point, sweep-line, and parametric-curve events with captions;
 - `status`: a short result or error message;
 - `succeeded`: whether the algorithm accepted the input.
 
@@ -324,6 +351,7 @@ my_algorithm::Result my_algorithm::Run(const std::vector<Point2>& points)
     Result result;
     GeometryScene& scene = result.visualization.scene;
     scene.points = points;
+    scene.initialVisiblePointCount = points.size();
 
     // Always-visible edge between point 0 and point 1.
     scene.persistentEdges.push_back({{0, 1}, EdgeLayer::Input});
@@ -349,6 +377,33 @@ my_algorithm::Result my_algorithm::Run(const std::vector<Point2>& points)
         "Accept result edge"
     });
 
+    // A generated point can be stored in scene.points and revealed later.
+    const std::size_t generated = scene.points.size();
+    scene.points.push_back({120.0, 80.0});
+    TimelineEvent showPoint;
+    showPoint.kind = TimelineEventKind::Point;
+    showPoint.pointAction = PointAction::Show;
+    showPoint.pointIndex = generated;
+    showPoint.point = scene.points[generated];
+    showPoint.pointStyle = ScenePointStyle{9.0, SceneColor{218, 67, 78, 255}};
+    showPoint.caption = "Reveal generated vertex";
+    scene.timeline.push_back(showPoint);
+
+    // Overlays are timeline state, not real graph edges.
+    TimelineEvent sweep;
+    sweep.kind = TimelineEventKind::SweepLine;
+    sweep.sweepLine.visible = true;
+    sweep.sweepLine.y = 42.0;
+    sweep.caption = "Move sweep line";
+    scene.timeline.push_back(sweep);
+
+    TimelineEvent curve;
+    curve.kind = TimelineEventKind::ParametricCurve;
+    curve.parametricCurve.visible = true;
+    curve.parametricCurve.samples = {{0.0, 0.0}, {40.0, 25.0}, {80.0, 0.0}};
+    curve.caption = "Draw sampled parametric curve";
+    scene.timeline.push_back(curve);
+
     result.visualization.status = "Ready.";
     result.visualization.succeeded = true;
     return result;
@@ -357,6 +412,10 @@ my_algorithm::Result my_algorithm::Run(const std::vector<Point2>& points)
 
 Every edge endpoint is an index into `scene.points`. Never emit an out-of-range
 index. Use the same `SceneEdge` and `EdgeLayer` for a matching add/remove pair.
+For generated vertices, append them after the input points and set
+`scene.initialVisiblePointCount = points.size()`. The visualizer will edit,
+save, and re-run only those leading input points; generated points are display
+artifacts controlled by timeline events.
 
 If the input is invalid, preserve the points for display, set a useful status
 message, leave `succeeded` false, and return without throwing when practical.
@@ -423,9 +482,10 @@ cd RaylibGeometryVisualizer
 .\build\Debug\geometry_visualizer.exe --smoke-test
 ```
 
-The smoke test loads every registered input, requires a successful non-empty
-timeline, checks TXT round-tripping, and initializes a hidden Raylib/OpenGL
-window. It returns a non-zero exit code on failure.
+The smoke test loads every registered input, requires successful API
+execution, checks TXT round-tripping, and initializes a hidden Raylib/OpenGL
+window. A timeline may be empty, which is useful for point-only
+visualizations. It returns a non-zero exit code on failure.
 
 ## Troubleshooting
 

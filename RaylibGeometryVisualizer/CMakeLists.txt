@@ -41,6 +41,15 @@ target_include_directories(triangulation_algorithm PUBLIC
 add_library(cpu_convex_hull_algorithm
     ../CompGeomAlgos/CPUConvexHull.cpp
 )
+
+add_library(fortune_voronoi_algorithm
+    ../FortuneVoronoi/FortuneVoronoi.cpp
+)
+target_compile_definitions(fortune_voronoi_algorithm PRIVATE FORTUNE_VORONOI_NO_MAIN)
+target_include_directories(fortune_voronoi_algorithm PUBLIC
+    ../FortuneVoronoi
+    ../include
+)
 target_compile_definitions(cpu_convex_hull_algorithm PRIVATE CPU_CONVEX_HULL_NO_MAIN)
 target_include_directories(cpu_convex_hull_algorithm PUBLIC
     ../CompGeomAlgos
@@ -56,11 +65,13 @@ target_include_directories(geometry_visualizer PRIVATE src ../include)
 target_compile_definitions(geometry_visualizer PRIVATE
     CPU_CONVEX_INPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../CompGeomAlgos/input.txt"
     TRIANGULATION_INPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../Triangulation/input.txt"
+    FORTUNE_VORONOI_INPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../FortuneVoronoi/input.txt"
 )
 target_link_libraries(geometry_visualizer PRIVATE
     raylib
     triangulation_algorithm
     cpu_convex_hull_algorithm
+    fortune_voronoi_algorithm
 )
 
 if(MSVC)

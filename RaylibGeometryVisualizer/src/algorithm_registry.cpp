@@ -1,6 +1,7 @@
 #include "algorithm_registry.h"
 
 #include "ConvexAPI.h"
+#include "FortuneAPI.h"
 #include "TriangulationAPI.h"
 
 #ifndef CPU_CONVEX_INPUT_FILE
@@ -9,6 +10,10 @@
 
 #ifndef TRIANGULATION_INPUT_FILE
 #define TRIANGULATION_INPUT_FILE "input.txt"
+#endif
+
+#ifndef FORTUNE_VORONOI_INPUT_FILE
+#define FORTUNE_VORONOI_INPUT_FILE "input.txt"
 #endif
 
 const std::vector<AlgorithmDefinition>& AvailableAlgorithms()
@@ -27,8 +32,14 @@ const std::vector<AlgorithmDefinition>& AvailableAlgorithms()
             [](const std::vector<Point2>& points) {
                 return triangulation::Run(points).visualization;
             }
+        },
+        {
+            "Fortune Voronoi",
+            FORTUNE_VORONOI_INPUT_FILE,
+            [](const std::vector<Point2>& points) {
+                return fortune_voronoi::Run(points).visualization;
+            }
         }
     };
     return algorithms;
 }
-

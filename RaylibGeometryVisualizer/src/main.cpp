@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -94,6 +95,11 @@ Color LayerColor(EdgeLayer layer)
     return BLACK;
 }
 
+Color ToRaylibColor(SceneColor color)
+{
+    return Color{color.r, color.g, color.b, color.a};
+}
+
 bool SameSceneEdge(const SceneEdge& first, const SceneEdge& second)
 {
     if (first.layer != second.layer) return false;
@@ -101,39 +107,128 @@ bool SameSceneEdge(const SceneEdge& first, const SceneEdge& second)
         (first.edge.first == second.edge.second && first.edge.second == second.edge.first);
 }
 
-std::vector<SceneEdge> ResolveTimelineEdges(
+struct VisualPoint {
+    Point2 position{};
+    ScenePointStyle style{};
+    bool visible = false;
+};
+
+struct ResolvedTimelineState {
+    std::vector<VisualPoint> points;
+    std::vector<SceneEdge> edges;
+    SweepLineState sweepLine;
+    ParametricCurveState parametricCurve;
+};
+
+ScenePointStyle PointStyleAt(const GeometryScene& scene, std::size_t index)
+{
+    if (index < scene.pointStyles.size()) return scene.pointStyles[index];
+    return {};
+}
+
+ResolvedTimelineState ResolveTimelineState(
     const GeometryScene& scene,
     std::size_t visibleEvents)
 {
-    std::vector<SceneEdge> edges;
+    ResolvedTimelineState state;
+    state.points.reserve(scene.points.size());
+
+    const std::size_t initiallyVisible =
+        scene.initialVisiblePointCount == std::numeric_limits<std::size_t>::max()
+            ? scene.points.size()
+            : std::min(scene.initialVisiblePointCount, scene.points.size());
+
+    for (std::size_t i = 0; i < scene.points.size(); ++i) {
+        state.points.push_back({
+            scene.points[i],
+            PointStyleAt(scene, i),
+            i < initiallyVisible
+        });
+    }
+
+    state.sweepLine = scene.persistentSweepLine;
+    state.parametricCurve = scene.persistentParametricCurve;
+
     const std::size_t visible = std::min(visibleEvents, scene.timeline.size());
     for (std::size_t i = 0; i < visible; ++i) {
         const TimelineEvent& event = scene.timeline[i];
-        if (event.action == EdgeAction::Add) {
-            edges.push_back(event.edge);
-        }
-        else {
-            const auto position = std::find_if(edges.begin(), edges.end(),
-                [&event](const SceneEdge& edge) { return SameSceneEdge(edge, event.edge); });
-            if (position != edges.end()) edges.erase(position);
+        switch (event.kind) {
+        case TimelineEventKind::Edge:
+            if (event.action == EdgeAction::Add) {
+                state.edges.push_back(event.edge);
+            }
+            else {
+                const auto position = std::find_if(state.edges.begin(), state.edges.end(),
+                    [&event](const SceneEdge& edge) { return SameSceneEdge(edge, event.edge); });
+                if (position != state.edges.end()) state.edges.erase(position);
+            }
+            break;
+        case TimelineEventKind::Point:
+            if (event.pointIndex >= state.points.size()) break;
+            if (event.pointAction == PointAction::Show) {
+                state.points[event.pointIndex].visible = true;
+                state.points[event.pointIndex].position = event.point;
+                state.points[event.pointIndex].style = event.pointStyle;
+            }
+            else if (event.pointAction == PointAction::Hide) {
+                state.points[event.pointIndex].visible = false;
+            }
+            else if (event.pointAction == PointAction::Move) {
+                state.points[event.pointIndex].position = event.point;
+            }
+            else if (event.pointAction == PointAction::Restyle) {
+                state.points[event.pointIndex].style = event.pointStyle;
+            }
+            break;
+        case TimelineEventKind::SweepLine:
+            state.sweepLine = event.sweepLine;
+            break;
+        case TimelineEventKind::ParametricCurve:
+            state.parametricCurve = event.parametricCurve;
+            break;
         }
     }
-    return edges;
+    return state;
 }
 
 void DrawSceneEdge(
-    const GeometryScene& scene,
+    const ResolvedTimelineState& state,
     const SceneEdge& sceneEdge,
     const View2D& view,
     float thickness)
 {
     const Edge2 edge = sceneEdge.edge;
-    if (edge.first >= scene.points.size() || edge.second >= scene.points.size()) return;
+    if (edge.first >= state.points.size() || edge.second >= state.points.size()) return;
+    if (!state.points[edge.first].visible || !state.points[edge.second].visible) return;
     DrawLineEx(
-        WorldToScreen(scene.points[edge.first], view),
-        WorldToScreen(scene.points[edge.second], view),
+        WorldToScreen(state.points[edge.first].position, view),
+        WorldToScreen(state.points[edge.second].position, view),
         thickness,
         LayerColor(sceneEdge.layer));
+}
+
+void DrawSweepLine(const SweepLineState& sweepLine, const View2D& view)
+{
+    if (!sweepLine.visible) return;
+    const Point2 worldLeft = ScreenToWorld({0.0F, 0.0F}, view);
+    const Point2 worldRight = ScreenToWorld({static_cast<float>(GetScreenWidth()), 0.0F}, view);
+    DrawLineEx(
+        WorldToScreen({worldLeft.x, sweepLine.y}, view),
+        WorldToScreen({worldRight.x, sweepLine.y}, view),
+        static_cast<float>(sweepLine.thickness),
+        ToRaylibColor(sweepLine.color));
+}
+
+void DrawParametricCurve(const ParametricCurveState& curve, const View2D& view)
+{
+    if (!curve.visible || curve.samples.size() < 2) return;
+    for (std::size_t i = 1; i < curve.samples.size(); ++i) {
+        DrawLineEx(
+            WorldToScreen(curve.samples[i - 1], view),
+            WorldToScreen(curve.samples[i], view),
+            static_cast<float>(curve.thickness),
+            ToRaylibColor(curve.color));
+    }
 }
 
 void DrawScene(
@@ -143,42 +238,62 @@ void DrawScene(
     int selectedPoint,
     int hoveredPoint)
 {
+    const ResolvedTimelineState state = ResolveTimelineState(scene, playback.visibleEvents);
+
+    DrawSweepLine(state.sweepLine, view);
+    DrawParametricCurve(state.parametricCurve, view);
+
     for (const SceneEdge& edge : scene.persistentEdges) {
-        DrawSceneEdge(scene, edge, view, 3.0F);
+        DrawSceneEdge(state, edge, view, 3.0F);
     }
 
-    const std::vector<SceneEdge> timelineEdges =
-        ResolveTimelineEdges(scene, playback.visibleEvents);
-    for (const SceneEdge& edge : timelineEdges) {
-        DrawSceneEdge(scene, edge, view, 3.5F);
+    for (const SceneEdge& edge : state.edges) {
+        DrawSceneEdge(state, edge, view, 3.5F);
     }
 
     if (playback.visibleEvents > 0 && playback.visibleEvents <= scene.timeline.size()) {
         const TimelineEvent& newest = scene.timeline[playback.visibleEvents - 1];
-        if (newest.action == EdgeAction::Add) {
+        if (newest.kind == TimelineEventKind::Edge && newest.action == EdgeAction::Add) {
             const float pulse = 4.5F + 0.8F * std::sin(static_cast<float>(GetTime()) * 5.0F);
-            DrawSceneEdge(scene, newest.edge, view, pulse);
+            DrawSceneEdge(state, newest.edge, view, pulse);
+        }
+        else if (newest.kind == TimelineEventKind::Point &&
+            newest.pointIndex < state.points.size() &&
+            state.points[newest.pointIndex].visible) {
+            const Vector2 screen = WorldToScreen(state.points[newest.pointIndex].position, view);
+            const float pulse = static_cast<float>(state.points[newest.pointIndex].style.radius) +
+                3.0F + 0.8F * std::sin(static_cast<float>(GetTime()) * 5.0F);
+            DrawCircleLines(static_cast<int>(screen.x), static_cast<int>(screen.y), pulse, ORANGE);
         }
     }
 
-    for (std::size_t i = 0; i < scene.points.size(); ++i) {
-        const Vector2 screen = WorldToScreen(scene.points[i], view);
+    for (std::size_t i = 0; i < state.points.size(); ++i) {
+        if (!state.points[i].visible) continue;
+        const Vector2 screen = WorldToScreen(state.points[i].position, view);
         const bool selected = static_cast<int>(i) == selectedPoint;
         const bool hovered = static_cast<int>(i) == hoveredPoint;
-        const float radius = selected ? 9.0F : (hovered ? 8.0F : 6.0F);
-        const Color color = selected ? ORANGE : Color{23, 49, 73, 255};
+        const float baseRadius = static_cast<float>(state.points[i].style.radius);
+        const float radius = selected ? baseRadius + 3.0F : (hovered ? baseRadius + 2.0F : baseRadius);
+        const Color color = selected ? ORANGE : ToRaylibColor(state.points[i].style.color);
         DrawCircleV(screen, radius, color);
-        if (selected || hovered || scene.points.size() <= 25) {
+        if (selected || hovered || state.points.size() <= 25) {
             DrawText(TextFormat("%zu", i), static_cast<int>(screen.x + 9.0F),
                 static_cast<int>(screen.y - 17.0F), 16, DARKGRAY);
         }
     }
 }
 
-int PointUnderMouse(const GeometryScene& scene, const View2D& view, Vector2 mouse)
+int PointUnderMouse(
+    const GeometryScene& scene,
+    const View2D& view,
+    const Playback& playback,
+    Vector2 mouse)
 {
-    for (std::size_t i = 0; i < scene.points.size(); ++i) {
-        if (CheckCollisionPointCircle(mouse, WorldToScreen(scene.points[i], view), 12.0F)) {
+    const ResolvedTimelineState state = ResolveTimelineState(scene, playback.visibleEvents);
+    for (std::size_t i = 0; i < state.points.size(); ++i) {
+        if (!state.points[i].visible) continue;
+        const float pickRadius = std::max(12.0F, static_cast<float>(state.points[i].style.radius) + 6.0F);
+        if (CheckCollisionPointCircle(mouse, WorldToScreen(state.points[i].position, view), pickRadius)) {
             return static_cast<int>(i);
         }
     }
@@ -217,12 +332,26 @@ void SavePointsToFile(const std::filesystem::path& path, const std::vector<Point
     if (!output) throw std::runtime_error("Failed while writing " + path.string());
 }
 
+std::size_t EditablePointCount(const GeometryScene& scene)
+{
+    if (scene.initialVisiblePointCount == std::numeric_limits<std::size_t>::max()) {
+        return scene.points.size();
+    }
+    return std::min(scene.initialVisiblePointCount, scene.points.size());
+}
+
+std::vector<Point2> EditablePoints(const GeometryScene& scene)
+{
+    const std::size_t count = EditablePointCount(scene);
+    return std::vector<Point2>(scene.points.begin(), scene.points.begin() + count);
+}
+
 void RunAlgorithm(
     const AlgorithmDefinition& algorithm,
     GeometryScene& scene,
     std::string& status)
 {
-    AlgorithmVisualization visualization = algorithm.run(scene.points);
+    AlgorithmVisualization visualization = algorithm.run(EditablePoints(scene));
     scene = std::move(visualization.scene);
     status = std::move(visualization.status);
 }
@@ -393,7 +522,7 @@ bool RunSmokeChecks(const std::vector<AlgorithmDefinition>& algorithms)
         try {
             const std::vector<Point2> points = LoadPointsFromFile(algorithm.inputFile);
             const AlgorithmVisualization visualization = algorithm.run(points);
-            if (!visualization.succeeded || visualization.scene.timeline.empty()) {
+            if (!visualization.succeeded) {
                 std::cerr << algorithm.name << " smoke test failed: "
                     << visualization.status << '\n';
                 return false;
@@ -454,7 +583,7 @@ int main(int argc, char* argv[])
         if (input.closeRequested) break;
         const ApplicationActions actions = MapInputToApplicationActions(input);
         const Vector2 mouse = actions.pointerPosition;
-        int hoveredPoint = PointUnderMouse(scene, view, mouse);
+        int hoveredPoint = PointUnderMouse(scene, view, playback, mouse);
 
         const float wheel = actions.zoomDelta;
         if (wheel != 0.0F) {
@@ -466,8 +595,10 @@ int main(int argc, char* argv[])
         }
 
         if (actions.secondaryPressed) {
-            if (hoveredPoint >= 0) {
-                scene.points.erase(scene.points.begin() + hoveredPoint);
+            if (hoveredPoint >= 0 && static_cast<std::size_t>(hoveredPoint) < EditablePointCount(scene)) {
+                std::vector<Point2> points = EditablePoints(scene);
+                points.erase(points.begin() + hoveredPoint);
+                scene.points = std::move(points);
                 RunAlgorithm(algorithms[activeAlgorithm], scene, status);
                 RestartPlayback(playback);
                 hoveredPoint = -1;
@@ -485,12 +616,17 @@ int main(int argc, char* argv[])
 
         if (actions.primaryPressed) {
             if (actions.addPointModifier && hoveredPoint < 0) {
-                scene.points.push_back(SnapToInteger(ScreenToWorld(mouse, view)));
+                std::vector<Point2> points = EditablePoints(scene);
+                points.push_back(SnapToInteger(ScreenToWorld(mouse, view)));
+                scene.points = std::move(points);
                 RunAlgorithm(algorithms[activeAlgorithm], scene, status);
                 RestartPlayback(playback);
             }
             else {
-                selectedPoint = hoveredPoint;
+                selectedPoint = (hoveredPoint >= 0 &&
+                    static_cast<std::size_t>(hoveredPoint) < EditablePointCount(scene))
+                        ? hoveredPoint
+                        : -1;
                 if (selectedPoint >= 0) playback.playing = false;
             }
         }
@@ -528,7 +664,7 @@ int main(int argc, char* argv[])
         }
         if (actions.save) {
             try {
-                SavePointsToFile(algorithms[activeAlgorithm].inputFile, scene.points);
+                SavePointsToFile(algorithms[activeAlgorithm].inputFile, EditablePoints(scene));
                 status = "Saved " + algorithms[activeAlgorithm].inputFile.filename().string() + ".";
             }
             catch (const std::exception& exception) {

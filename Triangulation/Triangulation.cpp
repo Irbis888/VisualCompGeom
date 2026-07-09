@@ -12,29 +12,6 @@
 #include "Commons.h"
 #include "TriangulationAPI.h"
 
-struct Face;
-
-struct HalfEdge {
-    Vertex* origin;
-    HalfEdge* twin;
-    HalfEdge* next;
-    HalfEdge* prev;
-    Face* face;
-    Vertex* helper;
-};
-
-struct Face
-{
-    HalfEdge* boundary;
-};
-
-struct DCEL
-{
-    std::vector<HalfEdge> halfEdges;
-    Face interiorFace;
-    Face exteriorFace;
-};
-
 enum class VertexType
 {
     Regular,

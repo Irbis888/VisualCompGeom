@@ -7,11 +7,31 @@ class Commons
 {};
 
 struct HalfEdge;
+struct Face;
 
 struct Vertex {
-	int x;
-	int y;
-	std::vector<HalfEdge*> incidentEdges;
+    int x;
+    int y;
+    std::vector<HalfEdge*> incidentEdges;
+};
+
+struct HalfEdge {
+    Vertex* origin = nullptr;
+    HalfEdge* twin = nullptr;
+    HalfEdge* next = nullptr;
+    HalfEdge* prev = nullptr;
+    Face* face = nullptr;
+    Vertex* helper = nullptr;
+};
+
+struct Face {
+    HalfEdge* boundary = nullptr;
+};
+
+struct DCEL {
+    std::vector<HalfEdge> halfEdges;
+    Face interiorFace;
+    Face exteriorFace;
 };
 
 inline long long Orient2D(const Vertex& a, const Vertex& b, const Vertex& c)
