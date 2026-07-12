@@ -64,8 +64,10 @@
     <None Include="run.ps1" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\algorithm_registry.cpp" />
+    <ClCompile Include="src\geometry_3d_visualizer.cpp" />
     <ClCompile Include="src\input_register.cpp" />
     <ClInclude Include="src\algorithm_registry.h" />
+    <ClInclude Include="src\geometry_3d_visualizer.h" />
     <ClInclude Include="src\input_register.h" />
     <ClInclude Include="..\CompGeomAlgos\ConvexAPI.h" />
     <ClInclude Include="..\FortuneVoronoi\FortuneAPI.h" />

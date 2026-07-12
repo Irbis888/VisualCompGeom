@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <string>
 
 struct InputButtonState {
     bool pressed = false;
@@ -20,6 +21,7 @@ struct InputRegister {
     Vector2 pointerPosition{};
     Vector2 pointerDelta{};
     float wheelDelta = 0.0F;
+    std::string textInput;
     bool closeRequested = false;
 
     std::array<InputButtonState, KeyboardKeyCapacity> keys{};
@@ -56,6 +58,11 @@ struct ApplicationActions {
     bool jumpToEnd = false;
     bool increaseSpeed = false;
     bool decreaseSpeed = false;
+    std::string textInput;
+    bool textBackspace = false;
+    bool textDelete = false;
+    bool textConfirm = false;
+    bool textCancel = false;
 };
 
 InputRegister CollectInputRegister();

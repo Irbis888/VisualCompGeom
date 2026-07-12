@@ -50,6 +50,15 @@ target_include_directories(fortune_voronoi_algorithm PUBLIC
     ../FortuneVoronoi
     ../include
 )
+
+add_library(delaunay_triangulation_algorithm
+    ../DelaunayTriangulation/DelaunayTriangulation.cpp
+)
+target_compile_definitions(delaunay_triangulation_algorithm PRIVATE DELAUNAY_TRIANGULATION_NO_MAIN)
+target_include_directories(delaunay_triangulation_algorithm PUBLIC
+    ../DelaunayTriangulation
+    ../include
+)
 target_compile_definitions(cpu_convex_hull_algorithm PRIVATE CPU_CONVEX_HULL_NO_MAIN)
 target_include_directories(cpu_convex_hull_algorithm PUBLIC
     ../CompGeomAlgos
@@ -60,18 +69,22 @@ add_executable(geometry_visualizer
     src/main.cpp
     src/algorithm_registry.cpp
     src/input_register.cpp
+    src/geometry_3d_visualizer.cpp
 )
+
 target_include_directories(geometry_visualizer PRIVATE src ../include)
 target_compile_definitions(geometry_visualizer PRIVATE
     CPU_CONVEX_INPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../CompGeomAlgos/input.txt"
     TRIANGULATION_INPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../Triangulation/input.txt"
     FORTUNE_VORONOI_INPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../FortuneVoronoi/input.txt"
+    DELAUNAY_TRIANGULATION_INPUT_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../DelaunayTriangulation/input.txt"
 )
 target_link_libraries(geometry_visualizer PRIVATE
     raylib
     triangulation_algorithm
     cpu_convex_hull_algorithm
     fortune_voronoi_algorithm
+    delaunay_triangulation_algorithm
 )
 
 if(MSVC)

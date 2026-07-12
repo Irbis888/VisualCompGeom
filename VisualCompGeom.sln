@@ -12,6 +12,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Triangulation", "Triangulat
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FortuneVoronoi", "FortuneVoronoi\FortuneVoronoi.vcxproj", "{72D49830-0C0E-4E57-A6B4-A12346D99EF1}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DelaunayTriangulation", "DelaunayTriangulation\DelaunayTriangulation.vcxproj", "{11431ADC-D338-433B-AEFA-4E49D315175B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -38,6 +40,10 @@ Global
 		{72D49830-0C0E-4E57-A6B4-A12346D99EF1}.Debug|x64.Build.0 = Debug|x64
 		{72D49830-0C0E-4E57-A6B4-A12346D99EF1}.Release|x64.ActiveCfg = Release|x64
 		{72D49830-0C0E-4E57-A6B4-A12346D99EF1}.Release|x64.Build.0 = Release|x64
+		{11431ADC-D338-433B-AEFA-4E49D315175B}.Debug|x64.ActiveCfg = Debug|x64
+		{11431ADC-D338-433B-AEFA-4E49D315175B}.Debug|x64.Build.0 = Debug|x64
+		{11431ADC-D338-433B-AEFA-4E49D315175B}.Release|x64.ActiveCfg = Release|x64
+		{11431ADC-D338-433B-AEFA-4E49D315175B}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

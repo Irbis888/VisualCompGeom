@@ -1,5 +1,7 @@
 # VisualCompGeom
 
+Current version: **0.0.2**
+
 VisualCompGeom is a small C++17 application for interactively visualizing
 computational-geometry algorithms. It uses [raylib](https://www.raylib.com/)
 for rendering and keeps algorithm code separate from the renderer through a
@@ -9,7 +11,8 @@ The application currently visualizes:
 
 - a CPU convex hull over an unordered point cloud;
 - polygon monotonization and triangulation;
-- Fortune's sweep-line algorithm for Voronoi diagrams.
+- Fortune's sweep-line algorithm for Voronoi diagrams;
+- randomized incremental Delaunay triangulation with edge legalization.
 
 Points can be edited directly in the window, algorithm operations can be
 played forward or backward, and each algorithm has a persistent TXT input
@@ -26,6 +29,42 @@ CUDA directories are experiments and are not registered in the visualizer.
 The documented and tested build environment is Windows x64 with Visual Studio
 2022 or 2026. The CMake project itself may be portable, but other operating
 systems are not currently tested by this repository.
+
+## Changelog
+
+### 0.0.2
+
+- Added live input updates for point add/move/delete operations. The
+  visualizer now reruns the active algorithm from the editable input-site
+  prefix instead of accidentally mixing generated algorithm vertices into the
+  input.
+- Added mouse control for the timeline progress bar: click to jump and drag to
+  scrub through algorithm events.
+- Added a seed textbox: empty means a fresh random rerun, while non-empty text
+  fixes randomized algorithm order reproducibly.
+- Improved Fortune Voronoi handling for degenerate cases:
+  - same-height site insertion no longer performs an invalid
+    `old, new, old` split;
+  - simultaneous circle events at the same event point are processed together;
+  - same-level circle events are accepted, fixing cases such as square corners
+    plus a center site where the center cell should be a rhombus.
+- Fortune Voronoi raw edges are updated online during the sweep and no longer
+  get removed and redrawn as an identical final diagram.
+- Fortune Voronoi clipping bounds now expand to include generated Voronoi
+  vertices.
+- Added the Delaunay Triangulation project with API, input file, standalone
+  Visual Studio project, visualizer registration, and access to the shared DCEL
+  structures.
+- Implemented randomized incremental Delaunay triangulation with triangle/edge
+  insertion, incircle-based edge legalization, one-step `Replace` flip events,
+  and final super-triangle cleanup.
+
+### 0.0.1
+
+- Initial raylib visualizer with shared `GeometryScene` timeline model.
+- Added CPU convex hull, polygon triangulation, and early Fortune Voronoi
+  visualization.
+- Added TXT input loading/saving and basic playback controls.
 
 ## Algorithms
 
@@ -66,6 +105,18 @@ site pointers, internal tree nodes store ordered breakpoint site-pairs, and the
 sampled parametric curve is produced only for visualization. The standalone
 Fortune project prints the raw vertices, raw-edge count, and clipped segments
 to the console.
+
+### Delaunay Triangulation
+
+`DelaunayTriangulation/DelaunayTriangulation.cpp` implements randomized
+incremental Delaunay triangulation. It starts from a super-triangle made from
+the top input site and two artificial vertices, inserts the remaining sites in
+a shuffled order, splits containing triangles or edges, and legalizes old edges
+with incircle tests. Edge flips are recorded as single `Replace` timeline
+actions. The final cleanup removes all artificial vertices and incident edges
+in one timeline step, so rewinding one step shows the full super-triangle
+context again. The result also exposes drawable edges and a basic shared-DCEL
+half-edge structure through `DelaunayAPI.h`.
 
 ### CUDA directories
 
@@ -173,7 +224,7 @@ requires CUDA 13.3. If CUDA is not installed, build or start only
 `RaylibGeometryVisualizer`; the visualizer itself has no CUDA dependency.
 
 The standalone `CompGeomAlgos/CPUConvexHull.slnx`,
-`FortuneVoronoi/FortuneVoronoi.slnx`, and `CudaPlayground/CudaPlayground.slnx`
+`FortuneVoronoi/FortuneVoronoi.slnx`, `DelaunayTriangulation/DelaunayTriangulation.slnx`, and `CudaPlayground/CudaPlayground.slnx`
 solutions remain available for focused console-project work.
 
 ## Using the application
@@ -187,6 +238,7 @@ The app starts in **CPU Convex Hull** mode.
 | `1` | Select CPU Convex Hull |
 | `2` | Select Polygon Triangulation |
 | `3` | Select Fortune Voronoi |
+| `4` | Select Delaunay Triangulation |
 | `Tab` | Select the next registered algorithm |
 
 Switching algorithms automatically loads that algorithm's TXT input file,
@@ -199,6 +251,8 @@ recomputes its visualization, resets playback, and fits the view.
 | `Space` | Play or pause forward playback |
 | `B` | Play or pause backward playback |
 | `Left` / `Right` | Press to move one operation backward or forward; hold to scroll continuously |
+| Mouse drag on progress bar | Jump/scrub to a timeline step |
+| Seed textbox | For randomized algorithms, leave empty for a fresh random run or type a seed for repeatable reruns |
 | `Home` / `End` | Jump to the beginning or end |
 | `R` | Replay from the beginning |
 | `Up` / `Down` | Increase or decrease playback speed |
@@ -217,8 +271,10 @@ recomputes its visualization, resets playback, and fits the view.
 | `Enter` | Re-run the active algorithm |
 | `Escape` | Close the application |
 
-Editing a point automatically recomputes the active algorithm and restarts
-its timeline.
+Editing a point automatically recomputes the active algorithm. The visualizer
+preserves the current/end timeline position when practical, so live point
+editing can be used to inspect how the result changes without manually
+replaying from the beginning every time.
 
 ### Loading and saving input
 
@@ -231,7 +287,8 @@ The files are:
 
 - `CompGeomAlgos/input.txt` for CPU Convex Hull;
 - `Triangulation/input.txt` for Polygon Triangulation;
-- `FortuneVoronoi/input.txt` for Fortune Voronoi sites.
+- `FortuneVoronoi/input.txt` for Fortune Voronoi sites;
+- `DelaunayTriangulation/input.txt` for Delaunay Triangulation sites.
 
 Both use this format:
 
@@ -275,6 +332,11 @@ VisualCompGeom/
 |   |-- FortuneAPI.h
 |   |-- FortuneVoronoi.cpp
 |   |-- FortuneVoronoi.vcxproj / FortuneVoronoi.slnx
+|   `-- input.txt
+|-- DelaunayTriangulation/
+|   |-- DelaunayAPI.h
+|   |-- DelaunayTriangulation.cpp
+|   |-- DelaunayTriangulation.vcxproj / DelaunayTriangulation.slnx
 |   `-- input.txt
 `-- RaylibGeometryVisualizer/
     |-- CMakeLists.txt
@@ -343,7 +405,7 @@ Result Run(const std::vector<Point2>& points);
 
 ### 2. Construct the visualization in the API
 
-The API—not the renderer—must decide which edges exist and when they change.
+The APIвЂ”not the rendererвЂ”must decide which edges exist and when they change.
 
 ```cpp
 my_algorithm::Result my_algorithm::Run(const std::vector<Point2>& points)
@@ -520,3 +582,4 @@ available.
 This repository currently has no root license file. Add an explicit license
 before publishing if you want others to have clear permission to use, modify,
 or redistribute the code.
+

@@ -2,9 +2,11 @@
 
 #include "GeometryScene.h"
 #include "algorithm_registry.h"
+#include "geometry_3d_visualizer.h"
 #include "input_register.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <exception>
@@ -30,6 +32,84 @@ struct Playback {
     float eventsPerSecond = 4.0F;
     float elapsed = 0.0F;
 };
+
+struct ProgressBarLayout {
+    int x = 32;
+    int y = 0;
+    int width = 1;
+    int height = 8;
+};
+
+ProgressBarLayout CurrentProgressBarLayout()
+{
+    return {
+        32,
+        GetScreenHeight() - 34,
+        std::max(1, GetScreenWidth() - 64),
+        8
+    };
+}
+
+struct SeedBoxLayout {
+    Rectangle bounds{82.0F, 186.0F, 245.0F, 24.0F};
+};
+
+SeedBoxLayout CurrentSeedBoxLayout()
+{
+    return {};
+}
+
+bool PointInSeedBox(Vector2 point, const SeedBoxLayout& box)
+{
+    return CheckCollisionPointRec(point, box.bounds);
+}
+
+void ApplySeedTextInput(std::string& seedText, const ApplicationActions& actions)
+{
+    constexpr std::size_t MaxSeedTextLength = 32;
+    for (const char ch : actions.textInput) {
+        const unsigned char byte = static_cast<unsigned char>(ch);
+        if (!std::isspace(byte) && seedText.size() < MaxSeedTextLength) {
+            seedText.push_back(ch);
+        }
+    }
+    if (actions.textBackspace && !seedText.empty()) {
+        seedText.pop_back();
+    }
+    if (actions.textDelete) {
+        seedText.clear();
+    }
+}
+
+bool PointInProgressBar(Vector2 point, const ProgressBarLayout& bar)
+{
+    constexpr float verticalGrabPadding = 12.0F;
+    return point.x >= static_cast<float>(bar.x) &&
+        point.x <= static_cast<float>(bar.x + bar.width) &&
+        point.y >= static_cast<float>(bar.y) - verticalGrabPadding &&
+        point.y <= static_cast<float>(bar.y + bar.height) + verticalGrabPadding;
+}
+
+void SeekPlaybackFromProgressBar(
+    Playback& playback,
+    const GeometryScene& scene,
+    Vector2 point,
+    const ProgressBarLayout& bar)
+{
+    playback.playing = false;
+    playback.elapsed = 0.0F;
+
+    if (scene.timeline.empty()) {
+        playback.visibleEvents = 0;
+        return;
+    }
+
+    const float rawProgress =
+        (point.x - static_cast<float>(bar.x)) / static_cast<float>(bar.width);
+    const float progress = std::clamp(rawProgress, 0.0F, 1.0F);
+    playback.visibleEvents = static_cast<std::size_t>(
+        std::llround(progress * static_cast<float>(scene.timeline.size())));
+}
 
 Vector2 WorldToScreen(Point2 world, const View2D& view)
 {
@@ -150,35 +230,56 @@ ResolvedTimelineState ResolveTimelineState(
     state.parametricCurve = scene.persistentParametricCurve;
 
     const std::size_t visible = std::min(visibleEvents, scene.timeline.size());
+    const auto removeEdge = [&state](const SceneEdge& edgeToRemove) {
+        const auto position = std::find_if(state.edges.begin(), state.edges.end(),
+            [&edgeToRemove](const SceneEdge& edge) { return SameSceneEdge(edge, edgeToRemove); });
+        if (position != state.edges.end()) state.edges.erase(position);
+    };
+    const auto applyEdgeChange = [&state, &removeEdge](
+        EdgeAction action,
+        const SceneEdge& edge,
+        const SceneEdge& replacementEdge) {
+        if (action == EdgeAction::Add) {
+            state.edges.push_back(edge);
+        }
+        else if (action == EdgeAction::Remove) {
+            removeEdge(edge);
+        }
+        else if (action == EdgeAction::Replace) {
+            removeEdge(edge);
+            state.edges.push_back(replacementEdge);
+        }
+    };
+    const auto applyPointChange = [&state](
+        PointAction action,
+        std::size_t pointIndex,
+        Point2 point,
+        ScenePointStyle style) {
+        if (pointIndex >= state.points.size()) return;
+        if (action == PointAction::Show) {
+            state.points[pointIndex].visible = true;
+            state.points[pointIndex].position = point;
+            state.points[pointIndex].style = style;
+        }
+        else if (action == PointAction::Hide) {
+            state.points[pointIndex].visible = false;
+        }
+        else if (action == PointAction::Move) {
+            state.points[pointIndex].position = point;
+        }
+        else if (action == PointAction::Restyle) {
+            state.points[pointIndex].style = style;
+        }
+    };
+
     for (std::size_t i = 0; i < visible; ++i) {
         const TimelineEvent& event = scene.timeline[i];
         switch (event.kind) {
         case TimelineEventKind::Edge:
-            if (event.action == EdgeAction::Add) {
-                state.edges.push_back(event.edge);
-            }
-            else {
-                const auto position = std::find_if(state.edges.begin(), state.edges.end(),
-                    [&event](const SceneEdge& edge) { return SameSceneEdge(edge, event.edge); });
-                if (position != state.edges.end()) state.edges.erase(position);
-            }
+            applyEdgeChange(event.action, event.edge, event.replacementEdge);
             break;
         case TimelineEventKind::Point:
-            if (event.pointIndex >= state.points.size()) break;
-            if (event.pointAction == PointAction::Show) {
-                state.points[event.pointIndex].visible = true;
-                state.points[event.pointIndex].position = event.point;
-                state.points[event.pointIndex].style = event.pointStyle;
-            }
-            else if (event.pointAction == PointAction::Hide) {
-                state.points[event.pointIndex].visible = false;
-            }
-            else if (event.pointAction == PointAction::Move) {
-                state.points[event.pointIndex].position = event.point;
-            }
-            else if (event.pointAction == PointAction::Restyle) {
-                state.points[event.pointIndex].style = event.pointStyle;
-            }
+            applyPointChange(event.pointAction, event.pointIndex, event.point, event.pointStyle);
             break;
         case TimelineEventKind::SweepLine:
             state.sweepLine = event.sweepLine;
@@ -186,6 +287,13 @@ ResolvedTimelineState ResolveTimelineState(
         case TimelineEventKind::ParametricCurve:
             state.parametricCurve = event.parametricCurve;
             break;
+        }
+
+        for (const TimelineEdgeChange& change : event.extraEdgeChanges) {
+            applyEdgeChange(change.action, change.edge, change.replacementEdge);
+        }
+        for (const TimelinePointChange& change : event.extraPointChanges) {
+            applyPointChange(change.action, change.pointIndex, change.point, change.style);
         }
     }
     return state;
@@ -199,7 +307,6 @@ void DrawSceneEdge(
 {
     const Edge2 edge = sceneEdge.edge;
     if (edge.first >= state.points.size() || edge.second >= state.points.size()) return;
-    if (!state.points[edge.first].visible || !state.points[edge.second].visible) return;
     DrawLineEx(
         WorldToScreen(state.points[edge.first].position, view),
         WorldToScreen(state.points[edge.second].position, view),
@@ -253,9 +360,13 @@ void DrawScene(
 
     if (playback.visibleEvents > 0 && playback.visibleEvents <= scene.timeline.size()) {
         const TimelineEvent& newest = scene.timeline[playback.visibleEvents - 1];
-        if (newest.kind == TimelineEventKind::Edge && newest.action == EdgeAction::Add) {
+        if (newest.kind == TimelineEventKind::Edge &&
+            (newest.action == EdgeAction::Add || newest.action == EdgeAction::Replace)) {
+            const SceneEdge pulseEdge = newest.action == EdgeAction::Replace
+                ? newest.replacementEdge
+                : newest.edge;
             const float pulse = 4.5F + 0.8F * std::sin(static_cast<float>(GetTime()) * 5.0F);
-            DrawSceneEdge(state, newest.edge, view, pulse);
+            DrawSceneEdge(state, pulseEdge, view, pulse);
         }
         else if (newest.kind == TimelineEventKind::Point &&
             newest.pointIndex < state.points.size() &&
@@ -346,24 +457,42 @@ std::vector<Point2> EditablePoints(const GeometryScene& scene)
     return std::vector<Point2>(scene.points.begin(), scene.points.begin() + count);
 }
 
-void RunAlgorithm(
+bool IsEditablePointIndex(const GeometryScene& scene, int pointIndex)
+{
+    return pointIndex >= 0 &&
+        static_cast<std::size_t>(pointIndex) < EditablePointCount(scene);
+}
+
+void RunAlgorithmOnInputPoints(
     const AlgorithmDefinition& algorithm,
+    const std::vector<Point2>& inputPoints,
+    const AlgorithmRunOptions& options,
     GeometryScene& scene,
     std::string& status)
 {
-    AlgorithmVisualization visualization = algorithm.run(EditablePoints(scene));
+    AlgorithmVisualization visualization = algorithm.run(inputPoints, options);
     scene = std::move(visualization.scene);
     status = std::move(visualization.status);
 }
 
+void RunAlgorithm(
+    const AlgorithmDefinition& algorithm,
+    const AlgorithmRunOptions& options,
+    GeometryScene& scene,
+    std::string& status)
+{
+    RunAlgorithmOnInputPoints(algorithm, EditablePoints(scene), options, scene, status);
+}
+
 bool LoadAlgorithmInput(
     const AlgorithmDefinition& algorithm,
+    const AlgorithmRunOptions& options,
     GeometryScene& scene,
     std::string& status)
 {
     try {
         scene.points = LoadPointsFromFile(algorithm.inputFile);
-        RunAlgorithm(algorithm, scene, status);
+        RunAlgorithm(algorithm, options, scene, status);
         return true;
     }
     catch (const std::exception& exception) {
@@ -379,6 +508,38 @@ void RestartPlayback(Playback& playback)
     playback.playing = true;
     playback.direction = 1;
     playback.elapsed = 0.0F;
+}
+
+void RestorePlaybackAfterInputEdit(
+    Playback& playback,
+    std::size_t oldVisibleEvents,
+    std::size_t oldTimelineSize,
+    const GeometryScene& scene)
+{
+    playback.playing = false;
+    playback.direction = 1;
+    playback.elapsed = 0.0F;
+
+    if (oldTimelineSize > 0 && oldVisibleEvents >= oldTimelineSize) {
+        playback.visibleEvents = scene.timeline.size();
+        return;
+    }
+
+    playback.visibleEvents = std::min(oldVisibleEvents, scene.timeline.size());
+}
+
+void RerunAfterInputEdit(
+    const AlgorithmDefinition& algorithm,
+    const std::vector<Point2>& inputPoints,
+    const AlgorithmRunOptions& options,
+    GeometryScene& scene,
+    std::string& status,
+    Playback& playback,
+    std::size_t oldVisibleEvents,
+    std::size_t oldTimelineSize)
+{
+    RunAlgorithmOnInputPoints(algorithm, inputPoints, options, scene, status);
+    RestorePlaybackAfterInputEdit(playback, oldVisibleEvents, oldTimelineSize, scene);
 }
 
 void UpdatePlayback(
@@ -452,15 +613,37 @@ void FitViewToScene(const GeometryScene& scene, View2D& view)
         return;
     }
 
-    double minX = scene.points.front().x;
-    double maxX = minX;
-    double minY = scene.points.front().y;
-    double maxY = minY;
-    for (const Point2 point : scene.points) {
+    bool hasPoint = false;
+    double minX = 0.0;
+    double maxX = 0.0;
+    double minY = 0.0;
+    double maxY = 0.0;
+
+    const auto includePoint = [&](Point2 point) {
+        if (!hasPoint) {
+            minX = maxX = point.x;
+            minY = maxY = point.y;
+            hasPoint = true;
+            return;
+        }
         minX = std::min(minX, point.x);
         maxX = std::max(maxX, point.x);
         minY = std::min(minY, point.y);
         maxY = std::max(maxY, point.y);
+    };
+
+    if (!scene.fitPointIndices.empty()) {
+        for (const std::size_t index : scene.fitPointIndices) {
+            if (index < scene.points.size()) includePoint(scene.points[index]);
+        }
+    }
+    else {
+        for (const Point2 point : scene.points) includePoint(point);
+    }
+
+    if (!hasPoint) {
+        view = {};
+        return;
     }
 
     view.center = {(minX + maxX) * 0.5, (minY + maxY) * 0.5};
@@ -485,10 +668,12 @@ void DrawInterface(
     const std::string& status,
     const AlgorithmDefinition& algorithm,
     std::size_t algorithmIndex,
-    std::size_t algorithmCount)
+    std::size_t algorithmCount,
+    const std::string& seedText,
+    bool seedBoxFocused)
 {
     const int panelWidth = std::min(GetScreenWidth() - 28, 790);
-    DrawRectangle(14, 14, panelWidth, 178, Fade(RAYWHITE, 0.94F));
+    DrawRectangle(14, 14, panelWidth, 220, Fade(RAYWHITE, 0.94F));
     DrawText(TextFormat("Geometry Visualizer - %s", algorithm.name.c_str()),
         28, 24, 24, Color{23, 49, 73, 255});
     DrawText(CurrentCaption(scene, playback).c_str(), 28, 55, 18, DARKGRAY);
@@ -504,24 +689,35 @@ void DrawInterface(
         algorithmCount, algorithmIndex + 1, algorithmCount,
         algorithm.inputFile.filename().string().c_str()), 28, 167, 15, GRAY);
 
-    const int barX = 32;
-    const int barWidth = std::max(1, GetScreenWidth() - 64);
-    const int barY = GetScreenHeight() - 34;
-    DrawRectangle(barX, barY, barWidth, 8, Color{205, 211, 219, 255});
+    DrawText("Seed", 28, 190, 15, GRAY);
+    const SeedBoxLayout seedBox = CurrentSeedBoxLayout();
+    DrawRectangleRec(seedBox.bounds, Fade(RAYWHITE, 0.98F));
+    DrawRectangleLinesEx(seedBox.bounds, seedBoxFocused ? 2.0F : 1.0F,
+        seedBoxFocused ? ORANGE : GRAY);
+    const std::string shownSeed = seedText.empty() ? "<random>" : seedText;
+    DrawText(shownSeed.c_str(), static_cast<int>(seedBox.bounds.x + 8.0F),
+        static_cast<int>(seedBox.bounds.y + 5.0F), 15,
+        seedText.empty() ? GRAY : DARKGRAY);
+    DrawText("empty = reshuffle every run", 336, 190, 15, GRAY);
+
+    const ProgressBarLayout bar = CurrentProgressBarLayout();
+    DrawRectangle(bar.x, bar.y, bar.width, bar.height, Color{205, 211, 219, 255});
     const float progress = scene.timeline.empty()
         ? 0.0F
         : static_cast<float>(playback.visibleEvents) / static_cast<float>(scene.timeline.size());
-    DrawRectangle(barX, barY, static_cast<int>(barWidth * progress), 8,
+    DrawRectangle(bar.x, bar.y, static_cast<int>(bar.width * progress), bar.height,
         Color{218, 67, 78, 255});
     DrawFPS(GetScreenWidth() - 95, 16);
 }
 
 bool RunSmokeChecks(const std::vector<AlgorithmDefinition>& algorithms)
 {
+    const AlgorithmRunOptions options;
     for (const AlgorithmDefinition& algorithm : algorithms) {
+        if (algorithm.view == AlgorithmView::Workspace3D) continue;
         try {
             const std::vector<Point2> points = LoadPointsFromFile(algorithm.inputFile);
-            const AlgorithmVisualization visualization = algorithm.run(points);
+            const AlgorithmVisualization visualization = algorithm.run(points, options);
             if (!visualization.succeeded) {
                 std::cerr << algorithm.name << " smoke test failed: "
                     << visualization.status << '\n';
@@ -570,20 +766,73 @@ int main(int argc, char* argv[])
     std::size_t activeAlgorithm = 0;
     GeometryScene scene;
     std::string status;
-    LoadAlgorithmInput(algorithms[activeAlgorithm], scene, status);
+    AlgorithmRunOptions runOptions;
+    LoadAlgorithmInput(algorithms[activeAlgorithm], runOptions, scene, status);
 
     View2D view;
     FitViewToScene(scene, view);
     Playback playback;
     int selectedPoint = -1;
+    std::size_t dragStartVisibleEvents = 0;
+    std::size_t dragStartTimelineSize = 0;
     bool panning = false;
+    bool scrubbingProgress = false;
+    bool seedBoxFocused = false;
 
     while (true) {
         const InputRegister input = CollectInputRegister();
         if (input.closeRequested) break;
         const ApplicationActions actions = MapInputToApplicationActions(input);
+
+        if (!seedBoxFocused) {
+            std::size_t requestedAlgorithm = activeAlgorithm;
+            if (actions.nextAlgorithm) {
+                requestedAlgorithm = (activeAlgorithm + 1) % algorithms.size();
+            }
+            if (actions.selectedAlgorithm >= 0 &&
+                static_cast<std::size_t>(actions.selectedAlgorithm) < algorithms.size()) {
+                requestedAlgorithm = static_cast<std::size_t>(actions.selectedAlgorithm);
+            }
+            if (requestedAlgorithm != activeAlgorithm) {
+                if (algorithms[activeAlgorithm].view == AlgorithmView::Workspace3D) {
+                    Deactivate3DVisualizer();
+                }
+                activeAlgorithm = requestedAlgorithm;
+                selectedPoint = -1;
+                panning = false;
+                scrubbingProgress = false;
+                if (algorithms[activeAlgorithm].view == AlgorithmView::Timeline2D) {
+                    LoadAlgorithmInput(algorithms[activeAlgorithm], runOptions, scene, status);
+                    RestartPlayback(playback);
+                    FitViewToScene(scene, view);
+                }
+            }
+        }
+
+        if (algorithms[activeAlgorithm].view == AlgorithmView::Workspace3D) {
+            Draw3DVisualizerFrame();
+            if (smokeTest) break;
+            continue;
+        }
+
         const Vector2 mouse = actions.pointerPosition;
+        const ProgressBarLayout progressBar = CurrentProgressBarLayout();
+        const SeedBoxLayout seedBox = CurrentSeedBoxLayout();
+        const bool mouseOverProgressBar = PointInProgressBar(mouse, progressBar);
+        const bool mouseOverSeedBox = PointInSeedBox(mouse, seedBox);
         int hoveredPoint = PointUnderMouse(scene, view, playback, mouse);
+
+        if (seedBoxFocused) {
+            ApplySeedTextInput(runOptions.randomSeed, actions);
+            if (actions.textCancel) {
+                seedBoxFocused = false;
+            }
+            if (actions.textConfirm) {
+                seedBoxFocused = false;
+                RunAlgorithm(algorithms[activeAlgorithm], runOptions, scene, status);
+                RestartPlayback(playback);
+            }
+        }
 
         const float wheel = actions.zoomDelta;
         if (wheel != 0.0F) {
@@ -595,12 +844,13 @@ int main(int argc, char* argv[])
         }
 
         if (actions.secondaryPressed) {
-            if (hoveredPoint >= 0 && static_cast<std::size_t>(hoveredPoint) < EditablePointCount(scene)) {
+            if (IsEditablePointIndex(scene, hoveredPoint)) {
+                const std::size_t oldVisibleEvents = playback.visibleEvents;
+                const std::size_t oldTimelineSize = scene.timeline.size();
                 std::vector<Point2> points = EditablePoints(scene);
                 points.erase(points.begin() + hoveredPoint);
-                scene.points = std::move(points);
-                RunAlgorithm(algorithms[activeAlgorithm], scene, status);
-                RestartPlayback(playback);
+                RerunAfterInputEdit(algorithms[activeAlgorithm], points, runOptions, scene, status,
+                    playback, oldVisibleEvents, oldTimelineSize);
                 hoveredPoint = -1;
             }
             else {
@@ -615,82 +865,99 @@ int main(int argc, char* argv[])
         if (actions.secondaryReleased) panning = false;
 
         if (actions.primaryPressed) {
-            if (actions.addPointModifier && hoveredPoint < 0) {
-                std::vector<Point2> points = EditablePoints(scene);
-                points.push_back(SnapToInteger(ScreenToWorld(mouse, view)));
-                scene.points = std::move(points);
-                RunAlgorithm(algorithms[activeAlgorithm], scene, status);
-                RestartPlayback(playback);
+            const bool hoveredEditablePoint = IsEditablePointIndex(scene, hoveredPoint);
+            if (mouseOverSeedBox) {
+                seedBoxFocused = true;
+                selectedPoint = -1;
+                panning = false;
+                scrubbingProgress = false;
             }
             else {
-                selectedPoint = (hoveredPoint >= 0 &&
-                    static_cast<std::size_t>(hoveredPoint) < EditablePointCount(scene))
-                        ? hoveredPoint
-                        : -1;
-                if (selectedPoint >= 0) playback.playing = false;
+                seedBoxFocused = false;
             }
+            if (seedBoxFocused) {
+                hoveredPoint = -1;
+            }
+            else if (!actions.addPointModifier && mouseOverProgressBar) {
+                scrubbingProgress = true;
+                selectedPoint = -1;
+                SeekPlaybackFromProgressBar(playback, scene, mouse, progressBar);
+                hoveredPoint = -1;
+            }
+            else if (actions.addPointModifier && !hoveredEditablePoint) {
+                const std::size_t oldVisibleEvents = playback.visibleEvents;
+                const std::size_t oldTimelineSize = scene.timeline.size();
+                std::vector<Point2> points = EditablePoints(scene);
+                points.push_back(SnapToInteger(ScreenToWorld(mouse, view)));
+                RerunAfterInputEdit(algorithms[activeAlgorithm], points, runOptions, scene, status,
+                    playback, oldVisibleEvents, oldTimelineSize);
+                hoveredPoint = -1;
+            }
+            else {
+                selectedPoint = hoveredEditablePoint ? hoveredPoint : -1;
+                if (selectedPoint >= 0) {
+                    dragStartVisibleEvents = playback.visibleEvents;
+                    dragStartTimelineSize = scene.timeline.size();
+                    playback.playing = false;
+                }
+            }
+        }
+        if (scrubbingProgress && actions.primaryDown) {
+            SeekPlaybackFromProgressBar(playback, scene, mouse, progressBar);
         }
         if (selectedPoint >= 0 && actions.primaryDown) {
             scene.points[static_cast<std::size_t>(selectedPoint)] =
                 SnapToInteger(ScreenToWorld(mouse, view));
+            playback.playing = false;
+            playback.visibleEvents = 0;
         }
         if (actions.primaryReleased) {
+            scrubbingProgress = false;
             if (selectedPoint >= 0) {
-                RunAlgorithm(algorithms[activeAlgorithm], scene, status);
-                RestartPlayback(playback);
+                scene.points[static_cast<std::size_t>(selectedPoint)] =
+                    SnapToInteger(ScreenToWorld(mouse, view));
+                RerunAfterInputEdit(algorithms[activeAlgorithm], EditablePoints(scene), runOptions,
+                    scene, status, playback, dragStartVisibleEvents, dragStartTimelineSize);
             }
             selectedPoint = -1;
         }
 
-        std::size_t requestedAlgorithm = activeAlgorithm;
-        if (actions.nextAlgorithm) {
-            requestedAlgorithm = (activeAlgorithm + 1) % algorithms.size();
-        }
-        if (actions.selectedAlgorithm >= 0 &&
-            static_cast<std::size_t>(actions.selectedAlgorithm) < algorithms.size()) {
-            requestedAlgorithm = static_cast<std::size_t>(actions.selectedAlgorithm);
-        }
-        if (requestedAlgorithm != activeAlgorithm) {
-            activeAlgorithm = requestedAlgorithm;
-            LoadAlgorithmInput(algorithms[activeAlgorithm], scene, status);
-            RestartPlayback(playback);
-            FitViewToScene(scene, view);
-        }
-
-        if (actions.load) {
-            LoadAlgorithmInput(algorithms[activeAlgorithm], scene, status);
-            RestartPlayback(playback);
-            FitViewToScene(scene, view);
-        }
-        if (actions.save) {
-            try {
-                SavePointsToFile(algorithms[activeAlgorithm].inputFile, EditablePoints(scene));
-                status = "Saved " + algorithms[activeAlgorithm].inputFile.filename().string() + ".";
+        if (!seedBoxFocused) {
+            if (actions.load) {
+                LoadAlgorithmInput(algorithms[activeAlgorithm], runOptions, scene, status);
+                RestartPlayback(playback);
+                FitViewToScene(scene, view);
             }
-            catch (const std::exception& exception) {
-                status = std::string("Save error: ") + exception.what();
-                playback.playing = false;
+            if (actions.save) {
+                try {
+                    SavePointsToFile(algorithms[activeAlgorithm].inputFile, EditablePoints(scene));
+                    status = "Saved " + algorithms[activeAlgorithm].inputFile.filename().string() + ".";
+                }
+                catch (const std::exception& exception) {
+                    status = std::string("Save error: ") + exception.what();
+                    playback.playing = false;
+                }
             }
-        }
-        if (actions.clear) {
-            scene = {};
-            RunAlgorithm(algorithms[activeAlgorithm], scene, status);
-            RestartPlayback(playback);
-        }
-        if (actions.runAlgorithm) {
-            RunAlgorithm(algorithms[activeAlgorithm], scene, status);
-            RestartPlayback(playback);
-        }
-        if (actions.fitView) FitViewToScene(scene, view);
+            if (actions.clear) {
+                scene = {};
+                RunAlgorithm(algorithms[activeAlgorithm], runOptions, scene, status);
+                RestartPlayback(playback);
+            }
+            if (actions.runAlgorithm) {
+                RunAlgorithm(algorithms[activeAlgorithm], runOptions, scene, status);
+                RestartPlayback(playback);
+            }
+            if (actions.fitView) FitViewToScene(scene, view);
 
-        UpdatePlayback(playback, scene, actions);
+            UpdatePlayback(playback, scene, actions);
+        }
 
         BeginDrawing();
         ClearBackground(Color{245, 247, 250, 255});
         DrawGrid(view);
         DrawScene(scene, view, playback, selectedPoint, hoveredPoint);
         DrawInterface(scene, playback, status, algorithms[activeAlgorithm],
-            activeAlgorithm, algorithms.size());
+            activeAlgorithm, algorithms.size(), runOptions.randomSeed, seedBoxFocused);
         EndDrawing();
 
         if (smokeTest) break;

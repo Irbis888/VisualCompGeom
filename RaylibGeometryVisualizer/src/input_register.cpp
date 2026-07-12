@@ -19,6 +19,12 @@ InputRegister CollectInputRegister()
     input.wheelDelta = GetMouseWheelMove();
     input.closeRequested = WindowShouldClose();
 
+    for (int codepoint = GetCharPressed(); codepoint > 0; codepoint = GetCharPressed()) {
+        if (codepoint >= 32 && codepoint <= 126) {
+            input.textInput.push_back(static_cast<char>(codepoint));
+        }
+    }
+
     for (std::size_t key = 0; key < input.keys.size(); ++key) {
         const int raylibKey = static_cast<int>(key);
         input.keys[key] = {
@@ -94,5 +100,10 @@ ApplicationActions MapInputToApplicationActions(const InputRegister& input)
     actions.jumpToEnd = input.Key(KEY_END).pressed;
     actions.increaseSpeed = input.Key(KEY_UP).pressed;
     actions.decreaseSpeed = input.Key(KEY_DOWN).pressed;
+    actions.textInput = input.textInput;
+    actions.textBackspace = input.Key(KEY_BACKSPACE).pressed || input.Key(KEY_BACKSPACE).repeated;
+    actions.textDelete = input.Key(KEY_DELETE).pressed || input.Key(KEY_DELETE).repeated;
+    actions.textConfirm = input.Key(KEY_ENTER).pressed;
+    actions.textCancel = input.Key(KEY_ESCAPE).pressed;
     return actions;
 }

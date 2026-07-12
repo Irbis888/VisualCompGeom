@@ -28,7 +28,8 @@ struct SceneEdge {
 
 enum class EdgeAction {
     Add,
-    Remove
+    Remove,
+    Replace
 };
 
 struct SceneColor {
@@ -71,6 +72,19 @@ enum class TimelineEventKind {
     ParametricCurve
 };
 
+struct TimelineEdgeChange {
+    EdgeAction action = EdgeAction::Add;
+    SceneEdge edge;
+    SceneEdge replacementEdge;
+};
+
+struct TimelinePointChange {
+    PointAction action = PointAction::Show;
+    std::size_t pointIndex = 0;
+    Point2 point{};
+    ScenePointStyle style{};
+};
+
 struct TimelineEvent {
     EdgeAction action = EdgeAction::Add;
     SceneEdge edge;
@@ -82,12 +96,16 @@ struct TimelineEvent {
     ScenePointStyle pointStyle{};
     SweepLineState sweepLine{};
     ParametricCurveState parametricCurve{};
+    SceneEdge replacementEdge;
+    std::vector<TimelineEdgeChange> extraEdgeChanges;
+    std::vector<TimelinePointChange> extraPointChanges;
 };
 
 // Algorithm-independent data consumed by the renderer.
 struct GeometryScene {
     std::vector<Point2> points;
     std::vector<ScenePointStyle> pointStyles;
+    std::vector<std::size_t> fitPointIndices;
     std::size_t initialVisiblePointCount = std::numeric_limits<std::size_t>::max();
     std::vector<SceneEdge> persistentEdges;
     SweepLineState persistentSweepLine;

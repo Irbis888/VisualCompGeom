@@ -64,6 +64,8 @@ struct RawEdge {
     std::size_t secondVertex = NoIndex;
     bool hasRayDirection = false;
     Point2 rayDirection{};
+    bool hasPreviewSceneEdge = false;
+    SceneEdge previewSceneEdge{};
 };
 
 struct RawSegment {
@@ -229,6 +231,11 @@ struct BeachNode {
 struct ArcSplit {
     BeachNode* leftArc = nullptr;
     BeachNode* middleArc = nullptr;
+    BeachNode* rightArc = nullptr;
+};
+
+struct ArcInsert {
+    BeachNode* leftArc = nullptr;
     BeachNode* rightArc = nullptr;
 };
 
@@ -415,6 +422,60 @@ public:
         return split;
     }
 
+    ArcInsert InsertArcBesideSameLevelArc(BeachNode* arc, Site* site)
+    {
+        ArcInsert insertion;
+        if (arc == nullptr || !arc->isLeaf || arc->site == nullptr || site == nullptr) {
+            return insertion;
+        }
+        if (SamePoint(arc->site->position, site->position)) return insertion;
+
+        BeachNode* newArc = CreateLeaf(site);
+        const bool insertBefore = site->position.x < arc->site->position.x;
+
+        if (insertBefore) {
+            BeachNode* oldPrevious = arc->prevLeaf;
+            newArc->prevLeaf = oldPrevious;
+            newArc->nextLeaf = arc;
+            arc->prevLeaf = newArc;
+            if (oldPrevious != nullptr) oldPrevious->nextLeaf = newArc;
+            TransferBreakpoint(oldPrevious, arc, oldPrevious, newArc);
+
+            BeachNode* breakpoint = CreateBreakpoint(site, arc->site);
+            ReplaceNode(arc, breakpoint);
+            breakpoint->left = newArc;
+            breakpoint->right = arc;
+            newArc->parent = breakpoint;
+            arc->parent = breakpoint;
+            insertion.leftArc = newArc;
+            insertion.rightArc = arc;
+            UpdateNode(breakpoint);
+            RebalanceFrom(breakpoint);
+        }
+        else {
+            BeachNode* oldNext = arc->nextLeaf;
+            newArc->prevLeaf = arc;
+            newArc->nextLeaf = oldNext;
+            arc->nextLeaf = newArc;
+            if (oldNext != nullptr) oldNext->prevLeaf = newArc;
+            TransferBreakpoint(arc, oldNext, newArc, oldNext);
+
+            BeachNode* breakpoint = CreateBreakpoint(arc->site, site);
+            ReplaceNode(arc, breakpoint);
+            breakpoint->left = arc;
+            breakpoint->right = newArc;
+            arc->parent = breakpoint;
+            newArc->parent = breakpoint;
+            insertion.leftArc = arc;
+            insertion.rightArc = newArc;
+            UpdateNode(breakpoint);
+            RebalanceFrom(breakpoint);
+        }
+
+        RefreshAll();
+        return insertion;
+    }
+
     BeachNode* PrevArc(BeachNode* arc) const
     {
         return arc == nullptr ? nullptr : arc->prevLeaf;
@@ -447,6 +508,15 @@ public:
             }
         }
         return nullptr;
+    }
+
+    bool ArcComesBefore(BeachNode* first, BeachNode* second) const
+    {
+        if (first == second) return false;
+        for (BeachNode* current = first; current != nullptr; current = current->nextLeaf) {
+            if (current == second) return true;
+        }
+        return false;
     }
 
     void RemoveArc(BeachNode* arc)
@@ -814,7 +884,7 @@ void CheckCircleEvent(FortuneState& fortune, BeachNode* arc, double sweepY)
 
     CircleGeometry circle;
     if (!ComputeCircle(previous->site, arc->site, next->site, circle)) return;
-    if (circle.bottom.y >= sweepY - Epsilon) return;
+    if (circle.bottom.y > sweepY + Epsilon) return;
     QueueCircleEvent(fortune, circle.bottom, arc);
 }
 
@@ -872,6 +942,35 @@ BoundingBox MakeBoundingBox(const std::vector<Point2>& points)
     const double height = std::max(1.0, maxY - minY);
     const double padding = std::max({80.0, width * 0.35, height * 0.35});
     return {minX - padding, maxX + padding, minY - padding, maxY + padding};
+}
+
+bool ExpandBoundingBoxToInclude(BoundingBox& box, Point2 point)
+{
+    if (!std::isfinite(point.x) || !std::isfinite(point.y)) return false;
+
+    const double width = std::max(1.0, box.maxX - box.minX);
+    const double height = std::max(1.0, box.maxY - box.minY);
+    const double padding = std::max({40.0, width * 0.05, height * 0.05});
+
+    const BoundingBox old = box;
+    box.minX = std::min(box.minX, point.x - padding);
+    box.maxX = std::max(box.maxX, point.x + padding);
+    box.minY = std::min(box.minY, point.y - padding);
+    box.maxY = std::max(box.maxY, point.y + padding);
+
+    return std::abs(box.minX - old.minX) > Epsilon ||
+        std::abs(box.maxX - old.maxX) > Epsilon ||
+        std::abs(box.minY - old.minY) > Epsilon ||
+        std::abs(box.maxY - old.maxY) > Epsilon;
+}
+
+bool ExpandBoundingBoxToInclude(BoundingBox& box, const std::vector<Point2>& points)
+{
+    bool expanded = false;
+    for (Point2 point : points) {
+        expanded = ExpandBoundingBoxToInclude(box, point) || expanded;
+    }
+    return expanded;
 }
 
 bool IsInside(Point2 point, const BoundingBox& box)
@@ -980,6 +1079,66 @@ std::vector<RawSegment> FinishAndClipRawEdges(const RawDiagram& raw, const Bound
     return segments;
 }
 
+void AddRawEdgePreviewEvent(
+    GeometryScene& scene,
+    const RawDiagram& raw,
+    RawEdge& edge,
+    const BoundingBox& box)
+{
+    if (edge.hasPreviewSceneEdge) {
+        scene.timeline.push_back({
+            EdgeAction::Remove,
+            edge.previewSceneEdge,
+            "Update online Voronoi edge"
+        });
+        edge.hasPreviewSceneEdge = false;
+    }
+
+    RawSegment preview;
+    if (!ClipRawEdge(raw, edge, box, preview)) return;
+
+    const std::size_t firstIndex = scene.points.size();
+    scene.points.push_back(preview.first);
+    scene.pointStyles.push_back(ScenePointStyle{2.0, SceneColor{218, 67, 78, 120}});
+
+    const std::size_t secondIndex = scene.points.size();
+    scene.points.push_back(preview.second);
+    scene.pointStyles.push_back(ScenePointStyle{2.0, SceneColor{218, 67, 78, 120}});
+
+    edge.previewSceneEdge = {{firstIndex, secondIndex}, EdgeLayer::Result};
+    edge.hasPreviewSceneEdge = true;
+
+    scene.timeline.push_back({
+        EdgeAction::Add,
+        edge.previewSceneEdge,
+        "Draw online Voronoi edge between sites " +
+            std::to_string(edge.leftSite == nullptr ? NoIndex : edge.leftSite->inputIndex) +
+            " and " +
+            std::to_string(edge.rightSite == nullptr ? NoIndex : edge.rightSite->inputIndex)
+    });
+}
+
+void AddRawEdgePreviewEvent(
+    GeometryScene& scene,
+    const RawDiagram& raw,
+    RawEdge* edge,
+    const BoundingBox& box)
+{
+    if (edge == nullptr) return;
+    AddRawEdgePreviewEvent(scene, raw, *edge, box);
+}
+
+void RefreshRawEdgePreviewEvents(
+    GeometryScene& scene,
+    const RawDiagram& raw,
+    const BoundingBox& box)
+{
+    for (const std::unique_ptr<RawEdge>& edge : raw.edges) {
+        if (edge == nullptr) continue;
+        AddRawEdgePreviewEvent(scene, raw, *edge, box);
+    }
+}
+
 std::string SiteEventCaption(const FortuneEvent& event)
 {
     const Site* site = event.site;
@@ -1069,39 +1228,6 @@ void AddHideSweepOverlaysEvent(GeometryScene& scene)
     scene.timeline.push_back(std::move(hideCurve));
 }
 
-void AddFinalSegmentEvents(GeometryScene& scene, const std::vector<RawSegment>& segments)
-{
-    for (const RawSegment& segment : segments) {
-        const std::size_t firstIndex = scene.points.size();
-        scene.points.push_back(segment.first);
-        scene.pointStyles.push_back(ScenePointStyle{3.5, SceneColor{218, 67, 78, 255}});
-
-        const std::size_t secondIndex = scene.points.size();
-        scene.points.push_back(segment.second);
-        scene.pointStyles.push_back(ScenePointStyle{3.5, SceneColor{218, 67, 78, 255}});
-
-        TimelineEvent firstPoint;
-        firstPoint.kind = TimelineEventKind::Point;
-        firstPoint.pointAction = PointAction::Show;
-        firstPoint.pointIndex = firstIndex;
-        firstPoint.point = segment.first;
-        firstPoint.pointStyle = ScenePointStyle{3.5, SceneColor{218, 67, 78, 255}};
-        firstPoint.caption = "Reveal clipped Voronoi edge endpoint";
-        scene.timeline.push_back(std::move(firstPoint));
-
-        TimelineEvent secondPoint = firstPoint;
-        secondPoint.pointIndex = secondIndex;
-        secondPoint.point = segment.second;
-        scene.timeline.push_back(std::move(secondPoint));
-
-        scene.timeline.push_back({
-            EdgeAction::Add,
-            {{firstIndex, secondIndex}, EdgeLayer::Result},
-            "Draw clipped Voronoi edge"
-        });
-    }
-}
-
 void HandleSiteEvent(
     FortuneState& fortune,
     GeometryScene& scene,
@@ -1129,67 +1255,247 @@ void HandleSiteEvent(
 
     InvalidateCircleEvent(arcAbove);
     Site* oldSite = arcAbove->site;
+
+    if (std::abs(oldSite->position.y - site->position.y) < Epsilon) {
+        ArcInsert insertion = fortune.beachLine.InsertArcBesideSameLevelArc(arcAbove, site);
+        if (insertion.leftArc == nullptr || insertion.rightArc == nullptr) return;
+
+        RawEdge* edge =
+            fortune.raw.CreateEdge(insertion.leftArc->site, insertion.rightArc->site);
+        fortune.beachLine.SetBreakpointEdge(insertion.leftArc, insertion.rightArc, edge);
+        AddRawEdgePreviewEvent(scene, fortune.raw, *edge, box);
+
+        CheckCircleEvent(fortune, insertion.leftArc, sweepY);
+        CheckCircleEvent(fortune, insertion.rightArc, sweepY);
+        AddCurveEvent(scene, fortune.beachLine, sweepY, box);
+        return;
+    }
+
     ArcSplit split = fortune.beachLine.ReplaceArcByThree(arcAbove, site);
 
     RawEdge* edge = fortune.raw.CreateEdge(oldSite, site);
     fortune.beachLine.SetBreakpointEdge(split.leftArc, split.middleArc, edge);
     fortune.beachLine.SetBreakpointEdge(split.middleArc, split.rightArc, edge);
+    AddRawEdgePreviewEvent(scene, fortune.raw, *edge, box);
 
     CheckCircleEvent(fortune, split.leftArc, sweepY);
     CheckCircleEvent(fortune, split.rightArc, sweepY);
     AddCurveEvent(scene, fortune.beachLine, sweepY, box);
 }
 
-void HandleCircleEvent(
+struct CircleEventCandidate {
+    CircleEvent* event = nullptr;
+    BeachNode* arc = nullptr;
+    CircleGeometry circle;
+};
+
+void AddUniqueRawEdge(std::vector<RawEdge*>& edges, RawEdge* edge)
+{
+    if (edge == nullptr) return;
+    if (std::find(edges.begin(), edges.end(), edge) == edges.end()) {
+        edges.push_back(edge);
+    }
+}
+
+Site* RejectedSiteForBreakpoint(BeachNode* leftArc, BeachNode* rightArc)
+{
+    if (leftArc == nullptr || rightArc == nullptr) return nullptr;
+    if (leftArc->prevLeaf != nullptr &&
+        leftArc->prevLeaf->site != leftArc->site &&
+        leftArc->prevLeaf->site != rightArc->site) {
+        return leftArc->prevLeaf->site;
+    }
+    if (rightArc->nextLeaf != nullptr &&
+        rightArc->nextLeaf->site != leftArc->site &&
+        rightArc->nextLeaf->site != rightArc->site) {
+        return rightArc->nextLeaf->site;
+    }
+    return nullptr;
+}
+
+void AttachBreakpointToVertex(
     FortuneState& fortune,
+    BeachNode* leftArc,
+    BeachNode* rightArc,
+    std::size_t vertexIndex,
+    std::vector<RawEdge*>& touchedEdges)
+{
+    RawEdge* edge = fortune.beachLine.GetBreakpointEdge(leftArc, rightArc);
+    fortune.raw.AttachVertex(edge, vertexIndex, RejectedSiteForBreakpoint(leftArc, rightArc));
+    AddUniqueRawEdge(touchedEdges, edge);
+}
+
+std::vector<CircleEventCandidate> MakeCircleEventCandidates(
+    FortuneState& fortune,
+    const std::vector<FortuneEvent>& events,
+    Point2 bottom)
+{
+    std::vector<CircleEventCandidate> candidates;
+    for (const FortuneEvent& event : events) {
+        CircleEvent* circleEvent = event.circleEvent;
+        if (circleEvent == nullptr || !circleEvent->valid) continue;
+
+        BeachNode* arc = circleEvent->disappearingArc;
+        BeachNode* leftArc = fortune.beachLine.PrevArc(arc);
+        BeachNode* rightArc = fortune.beachLine.NextArc(arc);
+        if (arc == nullptr || leftArc == nullptr || rightArc == nullptr) {
+            circleEvent->valid = false;
+            continue;
+        }
+
+        CircleGeometry circle;
+        if (!ComputeCircle(leftArc->site, arc->site, rightArc->site, circle) ||
+            !SamePoint(circle.bottom, bottom)) {
+            circleEvent->valid = false;
+            continue;
+        }
+
+        const bool duplicateArc = std::any_of(
+            candidates.begin(),
+            candidates.end(),
+            [arc](const CircleEventCandidate& candidate) {
+                return candidate.arc == arc;
+            });
+        if (!duplicateArc) candidates.push_back({circleEvent, arc, circle});
+    }
+
+    std::sort(
+        candidates.begin(),
+        candidates.end(),
+        [&fortune](const CircleEventCandidate& first, const CircleEventCandidate& second) {
+            return fortune.beachLine.ArcComesBefore(first.arc, second.arc);
+        });
+    return candidates;
+}
+
+void RefreshTouchedRawEdges(
     GeometryScene& scene,
-    const FortuneEvent& event,
-    double sweepY,
+    const RawDiagram& raw,
+    const std::vector<RawEdge*>& touchedEdges,
     const BoundingBox& box)
 {
-    CircleEvent* circleEvent = event.circleEvent;
-    if (circleEvent == nullptr || !circleEvent->valid) return;
+    for (RawEdge* edge : touchedEdges) {
+        AddRawEdgePreviewEvent(scene, raw, edge, box);
+    }
+}
 
-    BeachNode* middleArc = circleEvent->disappearingArc;
-    BeachNode* leftArc = fortune.beachLine.PrevArc(middleArc);
-    BeachNode* rightArc = fortune.beachLine.NextArc(middleArc);
-    if (middleArc == nullptr || leftArc == nullptr || rightArc == nullptr) {
-        circleEvent->valid = false;
+void HandleCircleEventBlock(
+    FortuneState& fortune,
+    GeometryScene& scene,
+    const std::vector<CircleEventCandidate>& candidates,
+    std::size_t begin,
+    std::size_t end,
+    double sweepY,
+    BoundingBox& box)
+{
+    if (begin >= end || end > candidates.size()) return;
+
+    BeachNode* firstRemovedArc = candidates[begin].arc;
+    BeachNode* lastRemovedArc = candidates[end - 1].arc;
+    BeachNode* leftBoundary = fortune.beachLine.PrevArc(firstRemovedArc);
+    BeachNode* rightBoundary = fortune.beachLine.NextArc(lastRemovedArc);
+    if (leftBoundary == nullptr || rightBoundary == nullptr) {
+        for (std::size_t i = begin; i < end; ++i) {
+            if (candidates[i].event != nullptr) candidates[i].event->valid = false;
+        }
         return;
     }
 
-    CircleGeometry circle;
-    if (!ComputeCircle(leftArc->site, middleArc->site, rightArc->site, circle)) {
-        circleEvent->valid = false;
-        return;
+    const CircleGeometry circle = candidates[begin].circle;
+    fortune.circleEventCount += end - begin;
+    AddSweepEvent(
+        scene,
+        sweepY,
+        (end - begin == 1 ? "Circle event at " : "Simultaneous circle events at ") +
+            FormatPoint(circle.bottom));
+
+    InvalidateCircleEvent(leftBoundary);
+    InvalidateCircleEvent(rightBoundary);
+    for (std::size_t i = begin; i < end; ++i) {
+        InvalidateCircleEvent(candidates[i].arc);
+        if (candidates[i].event != nullptr) candidates[i].event->valid = false;
     }
-
-    ++fortune.circleEventCount;
-    AddSweepEvent(scene, sweepY, "Circle event at " + FormatPoint(circleEvent->bottom));
-
-    InvalidateCircleEvent(leftArc);
-    InvalidateCircleEvent(rightArc);
 
     const std::size_t vertexIndex = fortune.raw.CreateVertex(circle.center);
+    const bool boxExpanded = ExpandBoundingBoxToInclude(box, circle.center);
     AddGeneratedPointEvent(scene, circle.center,
         ScenePointStyle{8.0, SceneColor{218, 67, 78, 255}},
-        "Create Voronoi vertex from circle event");
+        end - begin == 1
+            ? "Create Voronoi vertex from circle event"
+            : "Create Voronoi vertex from simultaneous circle events");
 
-    RawEdge* edgeAB = fortune.beachLine.GetBreakpointEdge(leftArc, middleArc);
-    RawEdge* edgeBC = fortune.beachLine.GetBreakpointEdge(middleArc, rightArc);
-    fortune.raw.AttachVertex(edgeAB, vertexIndex, rightArc->site);
-    fortune.raw.AttachVertex(edgeBC, vertexIndex, leftArc->site);
+    std::vector<RawEdge*> touchedEdges;
+    BeachNode* pairLeft = leftBoundary;
+    for (std::size_t i = begin; i < end; ++i) {
+        BeachNode* pairRight = candidates[i].arc;
+        AttachBreakpointToVertex(fortune, pairLeft, pairRight, vertexIndex, touchedEdges);
+        pairLeft = pairRight;
+    }
+    AttachBreakpointToVertex(fortune, pairLeft, rightBoundary, vertexIndex, touchedEdges);
 
-    fortune.beachLine.RemoveArc(middleArc);
-    circleEvent->valid = false;
+    for (std::size_t i = begin; i < end; ++i) {
+        fortune.beachLine.RemoveArc(candidates[i].arc);
+    }
 
-    RawEdge* edgeAC = fortune.raw.CreateEdge(leftArc->site, rightArc->site);
-    fortune.raw.AttachVertex(edgeAC, vertexIndex, middleArc->site);
-    fortune.beachLine.SetBreakpointEdge(leftArc, rightArc, edgeAC);
+    RawEdge* newEdge = fortune.raw.CreateEdge(leftBoundary->site, rightBoundary->site);
+    fortune.raw.AttachVertex(newEdge, vertexIndex, firstRemovedArc->site);
+    fortune.beachLine.SetBreakpointEdge(leftBoundary, rightBoundary, newEdge);
+    AddUniqueRawEdge(touchedEdges, newEdge);
 
-    CheckCircleEvent(fortune, leftArc, sweepY);
-    CheckCircleEvent(fortune, rightArc, sweepY);
+    if (boxExpanded) {
+        RefreshRawEdgePreviewEvents(scene, fortune.raw, box);
+    }
+    else {
+        RefreshTouchedRawEdges(scene, fortune.raw, touchedEdges, box);
+    }
+
+    CheckCircleEvent(fortune, leftBoundary, sweepY);
+    CheckCircleEvent(fortune, rightBoundary, sweepY);
     AddCurveEvent(scene, fortune.beachLine, sweepY, box);
+}
+
+void HandleCircleEvents(
+    FortuneState& fortune,
+    GeometryScene& scene,
+    const std::vector<FortuneEvent>& events,
+    double sweepY,
+    BoundingBox& box)
+{
+    if (events.empty()) return;
+    const Point2 bottom = events.front().point;
+    const std::vector<CircleEventCandidate> candidates =
+        MakeCircleEventCandidates(fortune, events, bottom);
+    if (candidates.empty()) return;
+
+    std::size_t begin = 0;
+    while (begin < candidates.size()) {
+        std::size_t end = begin + 1;
+        while (end < candidates.size() &&
+            candidates[end - 1].arc->nextLeaf == candidates[end].arc) {
+            ++end;
+        }
+        HandleCircleEventBlock(fortune, scene, candidates, begin, end, sweepY, box);
+        begin = end;
+    }
+}
+
+std::vector<FortuneEvent> GatherCoincidentCircleEvents(
+    FortuneState& fortune,
+    const FortuneEvent& firstEvent)
+{
+    std::vector<FortuneEvent> events;
+    events.push_back(firstEvent);
+
+    while (!fortune.events.empty()) {
+        const FortuneEvent event = fortune.events.top();
+        if (event.kind != FortuneEventKind::Circle ||
+            !SamePoint(event.point, firstEvent.point)) {
+            break;
+        }
+        fortune.events.pop();
+        if (EventIsValid(event)) events.push_back(event);
+    }
+    return events;
 }
 
 } // namespace
@@ -1210,7 +1516,7 @@ fortune_voronoi::Result fortune_voronoi::Run(const std::vector<Point2>& inputSit
         return result;
     }
 
-    const BoundingBox box = MakeBoundingBox(inputSites);
+    BoundingBox box = MakeBoundingBox(inputSites);
     FortuneState fortune;
     fortune.sites = MakeSites(inputSites);
     fortune.events = InitializeSiteEventQueue(fortune.sites);
@@ -1225,13 +1531,22 @@ fortune_voronoi::Result fortune_voronoi::Run(const std::vector<Point2>& inputSit
             HandleSiteEvent(fortune, scene, event, sweepY, box);
         }
         else {
-            HandleCircleEvent(fortune, scene, event, sweepY, box);
+            HandleCircleEvents(
+                fortune,
+                scene,
+                GatherCoincidentCircleEvents(fortune, event),
+                sweepY,
+                box);
         }
     }
 
+    // Keep the data result clipped to the expanded box, but do not repaint every
+    // preview edge after the sweep. The online timeline is already complete at
+    // this point; repainting only creates a long, purposeless flicker stage.
+    ExpandBoundingBoxToInclude(box, fortune.raw.vertices);
+
     const std::vector<RawSegment> segments = FinishAndClipRawEdges(fortune.raw, box);
     AddHideSweepOverlaysEvent(scene);
-    AddFinalSegmentEvents(scene, segments);
 
     result.voronoiVertices = fortune.raw.vertices;
     result.rawEdgeCount = fortune.raw.edges.size();
