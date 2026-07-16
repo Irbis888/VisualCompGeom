@@ -714,7 +714,25 @@ bool RunSmokeChecks(const std::vector<AlgorithmDefinition>& algorithms)
 {
     const AlgorithmRunOptions options;
     for (const AlgorithmDefinition& algorithm : algorithms) {
-        if (algorithm.view == AlgorithmView::Workspace3D) continue;
+        if (algorithm.view == AlgorithmView::Workspace3D) {
+            try {
+                if (!algorithm.run3D) {
+                    std::cerr << algorithm.name << " smoke test failed: missing 3D runner\n";
+                    return false;
+                }
+                const AlgorithmVisualization3D visualization = algorithm.run3D({}, options);
+                if (!visualization.succeeded || visualization.scene.vertices.empty()) {
+                    std::cerr << algorithm.name << " smoke test failed: "
+                        << visualization.status << '\n';
+                    return false;
+                }
+            }
+            catch (const std::exception& exception) {
+                std::cerr << algorithm.name << " smoke test failed: " << exception.what() << '\n';
+                return false;
+            }
+            continue;
+        }
         try {
             const std::vector<Point2> points = LoadPointsFromFile(algorithm.inputFile);
             const AlgorithmVisualization visualization = algorithm.run(points, options);
@@ -805,6 +823,16 @@ int main(int argc, char* argv[])
                     LoadAlgorithmInput(algorithms[activeAlgorithm], runOptions, scene, status);
                     RestartPlayback(playback);
                     FitViewToScene(scene, view);
+                }
+                else if (algorithms[activeAlgorithm].run3D) {
+                    Set3DVisualization(
+                        algorithms[activeAlgorithm].run3D({}, runOptions));
+                }
+                else {
+                    AlgorithmVisualization3D visualization;
+                    visualization.status =
+                        "The selected 3D tab has no registered API runner.";
+                    Set3DVisualization(std::move(visualization));
                 }
             }
         }

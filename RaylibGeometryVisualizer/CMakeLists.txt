@@ -65,6 +65,14 @@ target_include_directories(cpu_convex_hull_algorithm PUBLIC
     ../include
 )
 
+add_library(geometry_3d_algorithm
+    ../Geometry3D/Geometry3D.cpp
+)
+target_include_directories(geometry_3d_algorithm PUBLIC
+    ../Geometry3D
+    ../include
+)
+
 add_executable(geometry_visualizer
     src/main.cpp
     src/algorithm_registry.cpp
@@ -85,6 +93,7 @@ target_link_libraries(geometry_visualizer PRIVATE
     cpu_convex_hull_algorithm
     fortune_voronoi_algorithm
     delaunay_triangulation_algorithm
+    geometry_3d_algorithm
 )
 
 if(MSVC)

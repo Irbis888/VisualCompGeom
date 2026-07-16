@@ -3,6 +3,7 @@
 #include "ConvexAPI.h"
 #include "DelaunayAPI.h"
 #include "FortuneAPI.h"
+#include "Geometry3DAPI.h"
 #include "TriangulationAPI.h"
 
 #ifndef CPU_CONVEX_INPUT_FILE
@@ -56,7 +57,10 @@ const std::vector<AlgorithmDefinition>& AvailableAlgorithms()
             "3D Workspace",
             {},
             {},
-            AlgorithmView::Workspace3D
+            AlgorithmView::Workspace3D,
+            [](const std::vector<Point3>& vertices, const AlgorithmRunOptions&) {
+                return geometry_3d::Run(vertices).visualization;
+            }
         }
     };
     return algorithms;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GeometryScene.h"
+#include "GeometryScene3D.h"
 
 #include <filesystem>
 #include <functional>
@@ -21,6 +22,8 @@ struct AlgorithmDefinition {
     std::filesystem::path inputFile;
     std::function<AlgorithmVisualization(const std::vector<Point2>&, const AlgorithmRunOptions&)> run;
     AlgorithmView view = AlgorithmView::Timeline2D;
+    std::function<AlgorithmVisualization3D(
+        const std::vector<Point3>&, const AlgorithmRunOptions&)> run3D;
 };
 
 const std::vector<AlgorithmDefinition>& AvailableAlgorithms();

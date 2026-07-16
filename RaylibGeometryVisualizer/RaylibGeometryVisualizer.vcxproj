@@ -39,7 +39,7 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)..\include;$(ProjectDir)..\CompGeomAlgos;$(ProjectDir)..\Triangulation;$(ProjectDir)..\FortuneVoronoi;$(ProjectDir)build\_deps\raylib-src\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)..\include;$(ProjectDir)..\Geometry3D;$(ProjectDir)..\CompGeomAlgos;$(ProjectDir)..\Triangulation;$(ProjectDir)..\FortuneVoronoi;$(ProjectDir)build\_deps\raylib-src\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -47,7 +47,7 @@
     <NMakeReBuildCommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)build.ps1" -Configuration Debug</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path -LiteralPath '$(ProjectDir)build') { Remove-Item -LiteralPath '$(ProjectDir)build' -Recurse -Force }"</NMakeCleanCommandLine>
     <NMakeOutput>$(ProjectDir)build\Debug\geometry_visualizer.exe</NMakeOutput>
-    <NMakeIncludeSearchPath>$(ProjectDir)src;$(ProjectDir)..\include;$(ProjectDir)..\CompGeomAlgos;$(ProjectDir)..\Triangulation;$(ProjectDir)..\FortuneVoronoi;$(ProjectDir)build\_deps\raylib-src\src;$(VC_IncludePath);$(WindowsSDK_IncludePath)</NMakeIncludeSearchPath>
+    <NMakeIncludeSearchPath>$(ProjectDir)src;$(ProjectDir)..\include;$(ProjectDir)..\Geometry3D;$(ProjectDir)..\CompGeomAlgos;$(ProjectDir)..\Triangulation;$(ProjectDir)..\FortuneVoronoi;$(ProjectDir)build\_deps\raylib-src\src;$(VC_IncludePath);$(WindowsSDK_IncludePath)</NMakeIncludeSearchPath>
     <NMakePreprocessorDefinitions>WIN32;_DEBUG;NOMINMAX</NMakePreprocessorDefinitions>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -55,19 +55,23 @@
     <NMakeReBuildCommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)build.ps1" -Configuration Release</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path -LiteralPath '$(ProjectDir)build') { Remove-Item -LiteralPath '$(ProjectDir)build' -Recurse -Force }"</NMakeCleanCommandLine>
     <NMakeOutput>$(ProjectDir)build\Release\geometry_visualizer.exe</NMakeOutput>
-    <NMakeIncludeSearchPath>$(ProjectDir)src;$(ProjectDir)..\include;$(ProjectDir)..\CompGeomAlgos;$(ProjectDir)..\Triangulation;$(ProjectDir)..\FortuneVoronoi;$(ProjectDir)build\_deps\raylib-src\src;$(VC_IncludePath);$(WindowsSDK_IncludePath)</NMakeIncludeSearchPath>
+    <NMakeIncludeSearchPath>$(ProjectDir)src;$(ProjectDir)..\include;$(ProjectDir)..\Geometry3D;$(ProjectDir)..\CompGeomAlgos;$(ProjectDir)..\Triangulation;$(ProjectDir)..\FortuneVoronoi;$(ProjectDir)build\_deps\raylib-src\src;$(VC_IncludePath);$(WindowsSDK_IncludePath)</NMakeIncludeSearchPath>
     <NMakePreprocessorDefinitions>WIN32;NDEBUG;NOMINMAX</NMakePreprocessorDefinitions>
   </PropertyGroup>
   <ItemGroup>
     <None Include="CMakeLists.txt" />
     <None Include="build.ps1" />
     <None Include="run.ps1" />
+    <ClCompile Include="..\Geometry3D\Geometry3D.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\algorithm_registry.cpp" />
     <ClCompile Include="src\geometry_3d_visualizer.cpp" />
     <ClCompile Include="src\input_register.cpp" />
     <ClInclude Include="src\algorithm_registry.h" />
     <ClInclude Include="src\geometry_3d_visualizer.h" />
+    <ClInclude Include="..\Geometry3D\Geometry3DAPI.h" />
+    <ClInclude Include="..\include\Commons.h" />
+    <ClInclude Include="..\include\GeometryScene3D.h" />
     <ClInclude Include="src\input_register.h" />
     <ClInclude Include="..\CompGeomAlgos\ConvexAPI.h" />
     <ClInclude Include="..\FortuneVoronoi\FortuneAPI.h" />
